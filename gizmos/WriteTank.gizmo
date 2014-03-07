@@ -80,6 +80,7 @@ Gizmo {
  addUserKnob {41 reload l Reload -STARTLINE T Write1.reload}
  knobChanged "import nuke\nif hasattr(nuke, \"_shotgun_write_node_handler\"):\n    nuke._shotgun_write_node_handler.on_knob_changed_gizmo_callback()"
  onCreate "import nuke\nif hasattr(nuke, \"_shotgun_write_node_handler\"):\n    nuke._shotgun_write_node_handler.on_node_created_gizmo_callback()"
+ label "From \[python nuke.thisNode().knob('in_colorspace').value()] to \[python nuke.thisNode().knob('out_colorspace').value()]"
 }
  Input {
   inputs 0

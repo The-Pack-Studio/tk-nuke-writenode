@@ -476,7 +476,7 @@ class TankWriteNodeHandler(object):
             # make sure file_type is set properly:
             int_wn = new_sg_wn.node(TankWriteNodeHandler.WRITE_NODE_NAME)
             int_wn["file_type"].setValue(wn["file_type"].value())
-#        
+                   
             # copy across and knob values from the internal write node.
             for knob_name, knob in wn.knobs().iteritems():
                 # skip knobs we don't want to copy:
@@ -812,8 +812,9 @@ class TankWriteNodeHandler(object):
         # first set up the node label
         # this will be displayed on the node in the graph
         # useful to tell what type of node it is
-        pn = node.knob("profile_name").value()
-        label = "Shotgun Write %s" % pn
+        cIn = node.knob("in_colorspace").value()
+        cOut = node.knob("out_colorspace").value()
+        label = "From %s to %s" % (cIn, cOut)
         self.__update_knob_value(node, "label", label)
 
         # get the render path:

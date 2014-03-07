@@ -812,10 +812,9 @@ class TankWriteNodeHandler(object):
         # first set up the node label
         # this will be displayed on the node in the graph
         # useful to tell what type of node it is
-        cIn = node.knob("in_colorspace").value()
-        cOut = node.knob("out_colorspace").value()
-        label = "From %s to %s" % (cIn, cOut)
-        self.__update_knob_value(node, "label", label)
+        #pn = node.knob("profile_name").value()
+        #label = "Shotgun Write %s" % pn
+        #self.__update_knob_value(node, "label", label)
 
         # get the render path:
         path = self.__get_render_path(node, is_proxy)
@@ -830,6 +829,7 @@ class TankWriteNodeHandler(object):
             context_path = cached_path_preview["context_path"]
             local_path = cached_path_preview["local_path"]
             file_name = cached_path_preview["file_name"]
+            event = cached_path_preview["event"]
         else:
             # normalize the path for os platform
             norm_path = path.replace("/", os.sep)
@@ -861,11 +861,14 @@ class TankWriteNodeHandler(object):
                 # e.g. for path   /mnt/proj/shotXYZ/renders/v003/hello.%04d.exr
                 # context_path:   /mnt/proj/shotXYZ/renders/v003
                 # local_path:
-    
+
+            event = self._app.context.entity['name']
+            self.__update_knob_value(node, "EVENT", event)
+
             self.__path_preview_cache[cache_key] = {"context_path":context_path, 
                                                     "local_path":local_path, 
-                                                    "file_name":file_name}
-    
+                                                    "file_name":file_name,
+                                                    "event":event}
         # update the preview knobs - note, not sure why but
         # under certain circumstances the property editor doesn't
         # update correctly - hiding and showing the knob seems to
@@ -1016,6 +1019,10 @@ class TankWriteNodeHandler(object):
         
         # reset the render path:
         self.reset_render_path(node)
+
+
+
+
 
     def __wrap_text(self, t, line_length):
         """
@@ -1525,6 +1532,14 @@ class TankWriteNodeHandler(object):
             if name_as_channel:
                 # update channel to reflect the node name:
                 self.__set_channel(node, node.knob("name").value())
+
+        elif knob.name() == 'in_colorspace':
+            self.reset_render_path(node)
+
+
+        elif knob.name() == 'out_colorspace':
+            self.reset_render_path(node)
+
                 
         else:
             # Propogate changes to certain knobs from the gizmo/group to the

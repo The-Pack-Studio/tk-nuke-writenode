@@ -1020,9 +1020,16 @@ class TankWriteNodeHandler(object):
         # reset the render path:
         self.reset_render_path(node)
 
+    def __set_colorspace(self, node, colorspace_name):
+        """
+        Set the colorspace on the specified node from user interaction (donat)
+        """
+        self._app.log_debug("Changing the out colorspace for node '%s' to: %s" % (node.name(), colorspace_name))
+        # update channel knob:
+        self.__update_knob_value(node, "out_colorspace", colorspace_name)
 
-
-
+        # reset the render path:
+        self.reset_render_path(node)
 
     def __wrap_text(self, t, line_length):
         """
@@ -1067,7 +1074,7 @@ class TankWriteNodeHandler(object):
         render_path = None
         try:
             # gather the render settings to use when computing the path:
-            render_template, width, height, channel_name = self.__gather_render_settings(node, is_proxy)
+            render_template, width, height, channel_name, colorspace_name = self.__gather_render_settings(node, is_proxy)
             
             # experimental settings cache to avoid re-computing the path
             # if nothing has changed...
@@ -1077,6 +1084,7 @@ class TankWriteNodeHandler(object):
                 "width":width,
                 "height":height,
                 "channel":channel_name,
+                "colorspace":colorspace_name,
                 "script_path":nuke.root().name()
             }
             
@@ -1089,7 +1097,7 @@ class TankWriteNodeHandler(object):
                 self.__node_computed_path_settings_cache[(node, is_proxy)] = new_cache_entry
             
                 # compute the render path:
-                render_path = self.__compute_render_path_from(node, render_template, width, height, channel_name)
+                render_path = self.__compute_render_path_from(node, render_template, width, height, channel_name, colorspace_name)
                 
         except TkComputePathError, e:
             # render path could not be computed for some reason - display warning
@@ -1289,6 +1297,7 @@ class TankWriteNodeHandler(object):
         render_template = self.__get_render_template(node, is_proxy)
         width = height = 0
         channel_name = ""
+        colorspace_name = ''
         
         if is_proxy:
             if not render_template:
@@ -1308,8 +1317,11 @@ class TankWriteNodeHandler(object):
         
         if "channel" in render_template.keys:
             channel_name = node.knob("tank_channel").value()
+
+        if "colorspace" in render_template.keys:
+            colorspace_name = node.knob('out_colorspace').value()
             
-        return (render_template, width, height, channel_name)
+        return (render_template, width, height, channel_name, colorspace_name)
 
 
     def __compute_render_path(self, node, is_proxy=False):
@@ -1322,12 +1334,12 @@ class TankWriteNodeHandler(object):
         """
         
         # gather the render settings to use:
-        render_template, width, height, channel_name = self.__gather_render_settings(node, is_proxy)
+        render_template, width, height, channel_name, colorspace_name = self.__gather_render_settings(node, is_proxy)
 
         # compute the render path:
-        return self.__compute_render_path_from(node, render_template, width, height, channel_name)
+        return self.__compute_render_path_from(node, render_template, width, height, channel_name, colorspace_name)
 
-    def __compute_render_path_from(self, node, render_template, width, height, channel_name):
+    def __compute_render_path_from(self, node, render_template, width, height, channel_name, colorspace_name):
         """
         Computes the render path for a node using the specified settings
 
@@ -1380,7 +1392,12 @@ class TankWriteNodeHandler(object):
                 if not render_template.keys["channel"].validate(channel_name):                
                     raise TkComputePathError("The channel name '%s' contains illegal characters!" % channel_name)
                 fields["channel"] = channel_name
-         
+        
+        # add colorspace:
+        if "colorspace" in render_template.keys:
+            fields["colorspace"] = colorspace_name
+
+
         # update with additional fields from the context:       
         fields.update(self._app.context.as_template_fields(render_template))
 
@@ -1435,7 +1452,7 @@ class TankWriteNodeHandler(object):
                             path_is_locked = True
                             break
                         
-                        if name in ["width", "height"]:
+                        if name in ["width", "height", "colorspace"]:
                             # ignore these as they are free to change!
                             continue
                         elif prev_fields[name] != value:
@@ -1497,7 +1514,7 @@ class TankWriteNodeHandler(object):
         node = nuke.thisNode()
         knob = nuke.thisKnob()
         grp = nuke.thisGroup()
-        
+
         if not self.__is_node_fully_constructed(node):
             # knobChanged will be called during script load for all knobs with non-default 
             # values.  We want to ignore these implicit changes so we make use of a knob to
@@ -1533,13 +1550,11 @@ class TankWriteNodeHandler(object):
                 # update channel to reflect the node name:
                 self.__set_channel(node, node.knob("name").value())
 
-        elif knob.name() == 'in_colorspace':
-            self.reset_render_path(node)
-
-
         elif knob.name() == 'out_colorspace':
-            self.reset_render_path(node)
+            self._app.log_debug("Out colorspace has been changed")
+            new_out_colorspace = knob.value()
 
+            self.__set_colorspace(node, new_out_colorspace)
                 
         else:
             # Propogate changes to certain knobs from the gizmo/group to the

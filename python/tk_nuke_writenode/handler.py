@@ -318,6 +318,8 @@ class TankWriteNodeHandler(object):
         # a script is saved as a new name
         nuke.addOnScriptSave(self.__on_script_save)
 
+        nuke.addKnobChanged(self.__on_colorspace_change, nodeClass = 'OCIOColorSpace')
+
         # set up all existing nodes:
         for n in self.get_nodes():
             self.__setup_new_node(n)
@@ -328,6 +330,7 @@ class TankWriteNodeHandler(object):
         """
         nuke.removeOnScriptLoad(self.process_placeholder_nodes, nodeClass="Root")
         nuke.removeOnScriptSave(self.__on_script_save)
+        nuke.removeKnobChanged(self.__on_colorspace_change, nodeClass = 'OCIOColorSpace')
 
     def convert_sg_to_nuke_write_nodes(self):
         """
@@ -1020,17 +1023,18 @@ class TankWriteNodeHandler(object):
         # reset the render path:
         self.reset_render_path(node)
 
-    def __set_colorspace(self, node, colorspace_name):
-        """
-        Set the colorspace on the specified node from user interaction (donat)
-        """
-        self._app.log_debug("Changing the out colorspace for node '%s' to: %s" % (node.name(), colorspace_name))
-        # update channel knob:
-        self.__update_knob_value(node, "out_colorspace", colorspace_name)
+    def __on_colorspace_change(self):
 
-        # reset the render path:
-        self.reset_render_path(node)
+        node = nuke.thisNode()
+        knob = nuke.thisKnob()
+        grp = nuke.thisGroup()
 
+        #self._app.log_debug("group %s, knob %s" % (grp.name(), knob.name()))
+
+        if knob.name() == 'out_colorspace' and grp.Class() == self.SG_WRITE_NODE_CLASS:
+            self.reset_render_path(grp)
+            self._app.log_debug("The OCIO 'out_colorspace' within the gizmo has been changed")
+    
     def __wrap_text(self, t, line_length):
         """
         Wrap text to the line_length number of characters where possible
@@ -1549,12 +1553,6 @@ class TankWriteNodeHandler(object):
             if name_as_channel:
                 # update channel to reflect the node name:
                 self.__set_channel(node, node.knob("name").value())
-
-        elif knob.name() == 'out_colorspace':
-            self._app.log_debug("Out colorspace has been changed")
-            new_out_colorspace = knob.value()
-
-            self.__set_colorspace(node, new_out_colorspace)
                 
         else:
             # Propogate changes to certain knobs from the gizmo/group to the

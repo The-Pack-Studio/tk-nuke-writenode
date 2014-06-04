@@ -1512,6 +1512,11 @@ class TankWriteNodeHandler(object):
         # correctly.
         node.knob("tk_is_fully_constructed").setValue(True)
         node.knob("tk_is_fully_constructed").setEnabled(False)
+
+        # setting the event name when the shotgun write node is created
+        event = self._app.context.entity['name']
+        self.__update_knob_value(node, "EVENT", event)
+
     
     def __is_node_fully_constructed(self, node):
         """

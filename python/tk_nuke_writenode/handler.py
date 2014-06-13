@@ -1535,9 +1535,13 @@ class TankWriteNodeHandler(object):
         sg_fields = ['sg_camera_colorspace']
 
         data = self._app.shotgun.find_one(sg_entity_type, filters=sg_filters, fields=sg_fields)
-
-        return data['sg_camera_colorspace']
-
+        camCol = data['sg_camera_colorspace']
+        
+        
+        if camCol == None:
+            camCol = "Unspecified"
+        self._app.log_debug("Camera colorspace from shotgun is %s" % camCol)
+        return camCol
 
 
 

@@ -828,6 +828,7 @@ class TankWriteNodeHandler(object):
             local_path = cached_path_preview["local_path"]
             file_name = cached_path_preview["file_name"]
             event = cached_path_preview["event"]
+            cameraColorspace = cached_path_preview["cameraColorspace"]
         else:
             # normalize the path for os platform
             norm_path = path.replace("/", os.sep)
@@ -862,11 +863,16 @@ class TankWriteNodeHandler(object):
 
             event = self._app.context.entity['name']
             self.__update_knob_value(node, "EVENT", event)
+            cameraColorspace = self.__getCameraColorspaceFromShotgun()
+            self.__update_knob_value(node, "CAMERA", cameraColorspace)
+
+
 
             self.__path_preview_cache[cache_key] = {"context_path":context_path, 
                                                     "local_path":local_path, 
                                                     "file_name":file_name,
-                                                    "event":event}
+                                                    "event":event,
+                                                    "cameraColorspace":cameraColorspace}
         # update the preview knobs - note, not sure why but
         # under certain circumstances the property editor doesn't
         # update correctly - hiding and showing the knob seems to
@@ -1338,8 +1344,8 @@ class TankWriteNodeHandler(object):
             if "output" in render_template.keys or "channel" in render_template.keys:
                 output_name = node.knob(TankWriteNodeHandler.OUTPUT_KNOB_NAME).value()
             
-        if "colorspace" in render_template.keys:
-            colorspace_name = node.knob('out_colorspace').value()
+            if "colorspace" in render_template.keys:
+                colorspace_name = node.knob('out_colorspace').value()
 
         return (render_template, width, height, output_name, colorspace_name)
 
@@ -1513,11 +1519,28 @@ class TankWriteNodeHandler(object):
         node.knob("tk_is_fully_constructed").setValue(True)
         node.knob("tk_is_fully_constructed").setEnabled(False)
 
-        # setting the event name when the shotgun write node is created
+        # setting the event name and the camera colorspace when the shotgun write node is created
         event = self._app.context.entity['name']
         self.__update_knob_value(node, "EVENT", event)
+        cameraColorspace = self.__getCameraColorspaceFromShotgun()
+        self.__update_knob_value(node, "CAMERA", cameraColorspace)
 
-    
+
+    def __getCameraColorspaceFromShotgun(self): #Donat
+
+        entity = self._app.context.entity
+
+        sg_entity_type = entity["type"]  # should be Shot
+        sg_filters = [["id", "is", entity["id"]]]  #  code of the current shot
+        sg_fields = ['sg_camera_colorspace']
+
+        data = self._app.shotgun.find_one(sg_entity_type, filters=sg_filters, fields=sg_fields)
+
+        return data['sg_camera_colorspace']
+
+
+
+
     def __is_node_fully_constructed(self, node):
         """
         The tk_is_fully_constructed knob is set to True after the onCreate callback has completed.  This

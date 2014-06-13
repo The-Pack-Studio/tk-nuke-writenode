@@ -57,8 +57,9 @@ Gizmo {
  addUserKnob {22 tk_copy_path l "Copy Path to Clipboard" t "Copies the current render/proxy path to the clipboard" -STARTLINE T "import nuke\nif hasattr(nuke, \"_shotgun_write_node_handler\"):\n    nuke._shotgun_write_node_handler.on_copy_path_to_clipboard_gizmo_callback()"}
  addUserKnob {26 OCIO}
  addUserKnob {41 in_colorspace l "in" T OCIOColorSpace1.in_colorspace}
- addUserKnob {26 EVENT l "Event :" t "Event name used by OCIO to apply the correct lut's (i.e. if the lut is shot specific)" -STARTLINE}
+ addUserKnob {26 EVENT l "Event : " t "Event name used by OCIO to apply the correct lut's (i.e. if the lut is shot specific)" -STARTLINE}
  addUserKnob {41 out_colorspace l "out" T OCIOColorSpace1.out_colorspace}
+ addUserKnob {26 CAMERA l "Camera colorspace : " t "Camera colorspace defined in Shotgun database" -STARTLINE}
  addUserKnob {6 ocio_unpremult l premultiplied t "If there is an alpha channel, divide color data by the alpha before converting to the colorspace, and then multiply by the alpha afterwards. This will reproduce how partially transparent pixels are written by some renderers." -STARTLINE}
  addUserKnob {26 ""}
  addUserKnob {41 channels T Write1.channels}
@@ -80,7 +81,7 @@ Gizmo {
  addUserKnob {41 reload l Reload -STARTLINE T Write1.reload}
  knobChanged "import nuke\nif hasattr(nuke, \"_shotgun_write_node_handler\"):\n    nuke._shotgun_write_node_handler.on_knob_changed_gizmo_callback()"
  onCreate "import nuke\nif hasattr(nuke, \"_shotgun_write_node_handler\"):\n    nuke._shotgun_write_node_handler.on_node_created_gizmo_callback()"
- label "From \[python nuke.thisNode().knob('in_colorspace').value()] to \[python nuke.thisNode().knob('out_colorspace').value()]"
+ label "\[python nuke.thisNode().knob('in_colorspace').value()] to \[python nuke.thisNode().knob('out_colorspace').value()]"
 }
  Input {
   inputs 0
@@ -108,6 +109,8 @@ Gizmo {
   out_colorspace linear
   key1 EVENT
   value1 "\[python nuke.thisParent().knob('EVENT').value()]"
+  key2 CAMERA
+  value2 "\[python nuke.thisParent().knob('CAMERA').value()]"
   name OCIOColorSpace1
   label "\[python nuke.thisParent().knob('EVENT').toScript()]"
   xpos 195

@@ -31,6 +31,7 @@ class TankWriteNodeHandler(object):
     SG_WRITE_NODE_CLASS = "WriteTank"
     SG_WRITE_DEFAULT_NAME = "ShotgunWrite"
     WRITE_NODE_NAME = "Write1"
+    OCIO_NODE_NAME = "OCIOColorSpace1"
 
     OUTPUT_KNOB_NAME = "tank_channel"
     USE_NAME_AS_OUTPUT_KNOB_NAME = "tk_use_name_as_channel"
@@ -322,8 +323,6 @@ class TankWriteNodeHandler(object):
         # a script is saved as a new name
         nuke.addOnScriptSave(self.__on_script_save)
 
-        nuke.addKnobChanged(self.__on_colorspace_change, nodeClass = 'OCIOColorSpace')
-
         # set up all existing nodes:
         for n in self.get_nodes():
             self.__setup_new_node(n)
@@ -334,7 +333,6 @@ class TankWriteNodeHandler(object):
         """
         nuke.removeOnScriptLoad(self.process_placeholder_nodes, nodeClass="Root")
         nuke.removeOnScriptSave(self.__on_script_save)
-        nuke.removeKnobChanged(self.__on_colorspace_change, nodeClass = 'OCIOColorSpace')
 
     def convert_sg_to_nuke_write_nodes(self):
         """
@@ -912,6 +910,8 @@ class TankWriteNodeHandler(object):
         proxy_publish_template = self._app.get_template_by_name(profile["proxy_publish_template"])
         file_type = profile["file_type"]
         file_settings = profile["settings"]
+        ocio_colorspace_in = profile["ocio_colorspace_in"]
+        ocio_colorspace_out = profile["ocio_colorspace_out"]
 
         # Make sure any invalid entries are removed from the profile list:
         list_profiles = node.knob("tk_profile_list").values()
@@ -928,6 +928,9 @@ class TankWriteNodeHandler(object):
         # auto-populate output name based on template
         self.__populate_initial_output_name(render_template, node)
 
+        # set ocio colorspace in and out knobs
+        self.__populate_ocio_knobs(node, ocio_colorspace_in, ocio_colorspace_out)
+
         # write the template name to the node so that we know it later
         self.__update_knob_value(node, "render_template", render_template.name)
         self.__update_knob_value(node, "publish_template", publish_template.name)
@@ -937,7 +940,7 @@ class TankWriteNodeHandler(object):
                                  proxy_publish_template.name if proxy_publish_template else "")
 
         # reset the render path:
-        self.reset_render_path(node)
+        #self.reset_render_path(node) # Disabling this as a workaround for the nuke.root().name() not attached to a node bug
 
     def __populate_initial_output_name(self, template, node):
         """
@@ -1022,6 +1025,42 @@ class TankWriteNodeHandler(object):
                 self._app.log_error("Could not set %s file format setting %s to '%s'. Instead the value was set to '%s'" 
                                     % (file_type, setting_name, setting_value, knob.value()))
 
+    
+    def __populate_ocio_knobs(self, node, ocio_colorspace_in, ocio_colorspace_out):  # donat
+        '''
+        Controls the OCIO knobs of the gizmo
+        '''
+        
+        if "camera" in ocio_colorspace_in:
+            ocio_colorspace_in = self.__getCameraColorspaceFromShotgun()
+        if "camera" in ocio_colorspace_out:
+            ocio_colorspace_out = self.__getCameraColorspaceFromShotgun()
+
+        if ocio_colorspace_in == 'Unspecified' or ocio_colorspace_out == 'Unspecified':
+            self._app.log_error("The Camera colorspace field in Shotgun is emtpy, please set the value on the Shot Info page")
+            return
+                                   
+
+
+        # get the embedded ocio node:
+        ocio_node = node.node(TankWriteNodeHandler.OCIO_NODE_NAME)
+
+        # set the in colorspace
+        ocio_node.knob('in_colorspace').setValue(ocio_colorspace_in)
+        # and read it back to check that the value is what we expect
+        if ocio_node.knob('in_colorspace').value() != ocio_colorspace_in:
+            self._app.log_error("Shotgun write node configuration refers to an invalid input colorspace, '%s'."
+                                "Check the shot_step.yml and/or the OCIO config file used in Nuke" % ocio_colorspace_in)
+        # set the out colorspace
+        ocio_node.knob('out_colorspace').setValue(ocio_colorspace_out)
+        # and read it back to check that the value is what we expect
+        if ocio_node.knob('out_colorspace').value() != ocio_colorspace_out:
+            self._app.log_error("Shotgun write node configuration refers to an invalid output colorspace, '%s'."
+                                "Check the shot_step.yml and/or the OCIO config file used in Nuke" % ocio_colorspace_out)
+
+    
+
+
     def __set_output(self, node, output_name):
         """
         Set the output on the specified node from user interaction.
@@ -1034,18 +1073,6 @@ class TankWriteNodeHandler(object):
         # reset the render path:
         self.reset_render_path(node)
 
-    def __on_colorspace_change(self):
-
-        node = nuke.thisNode()
-        knob = nuke.thisKnob()
-        grp = nuke.thisGroup()
-
-        #self._app.log_debug("group %s, knob %s" % (grp.name(), knob.name()))
-
-        if knob.name() == 'out_colorspace' and grp.Class() == self.SG_WRITE_NODE_CLASS:
-            self.reset_render_path(grp)
-            self._app.log_debug("The OCIO 'out_colorspace' within the gizmo has been changed")
-    
     def __wrap_text(self, t, line_length):
         """
         Wrap text to the line_length number of characters where possible
@@ -1104,7 +1131,7 @@ class TankWriteNodeHandler(object):
                 "colorspace":colorspace_name,
                 "script_path":nuke.root().name()
             }
-            
+
             if (not force_reset) and old_cache_entry and cache_entry == old_cache_entry:
                 # nothing of relevance has changed since the last time the path was
                 # computed so just use the cached path:

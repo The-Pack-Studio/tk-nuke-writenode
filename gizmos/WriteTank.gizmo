@@ -29,7 +29,6 @@ version 8.0 v2
 ##########################################################################################
 
 Gizmo {
-
  note_font Verdana
  mapsize {0.15 0.15}
  addUserKnob {
@@ -123,7 +122,6 @@ Gizmo {
     t "A dictionary of file type settings to be applied to the Write node - this cached value is used if the profile can't be determined"
     +INVISIBLE
  }  
-  
  addUserKnob {
     26 "" 
     l "" 
@@ -259,8 +257,6 @@ Gizmo {
  }
  Reformat2_disable true
 
-
- }
  addUserKnob {
     41 views 
     T Write1.views

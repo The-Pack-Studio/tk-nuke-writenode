@@ -12,6 +12,7 @@ import os
 import sys
 import tempfile
 import pickle
+import datetime
 
 import nuke
 import nukescripts
@@ -63,6 +64,9 @@ class TankWriteNodeHandler(object):
         self.__currently_rendering_nodes = set()
         self.__node_computed_path_settings_cache = {}
         self.__path_preview_cache = {}
+        # flags to track when the render and proxy paths are being updated.
+        self.__is_updating_render_path = False
+        self.__is_updating_proxy_path = False
 
         # get the camera colorspace from Shotgun. donat
         self.cameraColorspace = self.__getCameraColorspaceFromShotgun()
@@ -84,7 +88,12 @@ class TankWriteNodeHandler(object):
         """
         Returns a list of tank write nodes
         """
-        return nuke.allNodes(group=nuke.root(), filter=TankWriteNodeHandler.SG_WRITE_NODE_CLASS, recurseGroups = True)
+        if nuke.exists("root"):
+            return nuke.allNodes(group=nuke.root(), 
+                                 filter=TankWriteNodeHandler.SG_WRITE_NODE_CLASS, 
+                                 recurseGroups = True)
+        else:
+            return []
             
     def get_node_name(self, node):
         """
@@ -192,13 +201,12 @@ class TankWriteNodeHandler(object):
 
         :returns: a node object.
         """
-        if nuke.root().name() == "Root":
-            # must snapshot first!
+        curr_filename = self.__get_current_script_path()
+        if not curr_filename:
             nuke.message("Please save the file first!")
             return
 
         # make sure that the file is a proper tank work path
-        curr_filename = nuke.root().name().replace("/", os.path.sep)
         if not self._script_template.validate(curr_filename):
             nuke.message("This file is not a Shotgun work file. Please use Shotgun Save-As in order "
                          "to save the file as a valid work file.")
@@ -221,7 +229,7 @@ class TankWriteNodeHandler(object):
         self._app.log_debug("Created Shotgun Write Node %s" % node.name())
 
         # set the profile:
-        self.__set_profile(node, profile_name)
+        self.__set_profile(node, profile_name, reset_all_settings=True)
 
         return node
 
@@ -326,6 +334,10 @@ class TankWriteNodeHandler(object):
         # script save callback used to reset paths whenever
         # a script is saved as a new name
         nuke.addOnScriptSave(self.__on_script_save)
+        
+        # user create callback that gets executed whenever a Shotgun Write Node
+        # is created by the user
+        nuke.addOnUserCreate(self.__on_user_create, nodeClass=TankWriteNodeHandler.SG_WRITE_NODE_CLASS)
 
         # set up all existing nodes:
         for n in self.get_nodes():
@@ -337,6 +349,7 @@ class TankWriteNodeHandler(object):
         """
         nuke.removeOnScriptLoad(self.process_placeholder_nodes, nodeClass="Root")
         nuke.removeOnScriptSave(self.__on_script_save)
+        nuke.removeOnUserCreate(self.__on_user_create, nodeClass=TankWriteNodeHandler.SG_WRITE_NODE_CLASS)
 
     def convert_sg_to_nuke_write_nodes(self):
         """
@@ -529,7 +542,9 @@ class TankWriteNodeHandler(object):
 
     def on_node_created_gizmo_callback(self):
         """
-        Called when a new instance of a Shotgun Write Node is created
+        Called when an instance of a Shotgun Write Node is created.  This can
+        be when the node is created for the first time or when it is loaded
+        or imported/pasted from an existing script.
         """
         self.__setup_new_node(nuke.thisNode())
 
@@ -910,12 +925,16 @@ class TankWriteNodeHandler(object):
         self.__populate_format_settings(node, file_type, file_settings)        
         
 
-    def __set_profile(self, node, profile_name):
+    def __set_profile(self, node, profile_name, reset_all_settings=False):
         """
         Set the current profile for the specified node.
         
-        :param node:            The Shotgun Write node to set the profile on
-        :param profile_name:    The name of the profile to set on the node
+        :param node:                The Shotgun Write node to set the profile on
+        :param profile_name:        The name of the profile to set on the node
+        :param reset_all_settings:  If true then all settings from the profile will be reset on the node.  If 
+                                    false, only those that _aren't_ propagated up to the Shotgun Write node will 
+                                    be reset.  For example, if colorspace has been set in the profile and force
+                                    is False then the knob won't get reset to the value from the profile.
         """
         # can't change the profile if this isn't a valid profile:
         if profile_name not in self._profiles:
@@ -959,14 +978,12 @@ class TankWriteNodeHandler(object):
         self.__update_knob_value(node, "tk_profile_list", profile_name)
         
         # set the format
-        self.__populate_format_settings(node, file_type, file_settings)
+        self.__populate_format_settings(node, file_type, file_settings, reset_all_settings)
+        
         # cache the type and settings on the root node so that 
         # they get serialized with the script:
         self.__update_knob_value(node, "tk_file_type", file_type)
         self.__update_knob_value(node, "tk_file_type_settings", pickle.dumps(file_settings))
-
-        # auto-populate output name based on template
-        self.__populate_initial_output_name(render_template, node)
 
         # set ocio colorspace in and out knobs
         self.__populate_ocio_knobs(node, ocio_colorspace_in, ocio_colorspace_out)
@@ -1057,9 +1074,16 @@ class TankWriteNodeHandler(object):
         # finally, set the output name on the knob:
         node.knob(TankWriteNodeHandler.OUTPUT_KNOB_NAME).setValue(output_name)
 
-    def __populate_format_settings(self, node, file_type, file_settings):
+    def __populate_format_settings(self, node, file_type, file_settings, reset_all_settings=False):
         """
         Controls the file format of the write node
+        
+        :param node:                The Shotgun Write node to set the profile on
+        :param file_type:           The file type to set on the internal Write node
+        :param file_settings:       A dictionary of settings to set on the internal Write node
+        :param reset_all_settings:  Determines if all settings should be set on the internal Write 
+                                    node (True) or just those that aren't propagated to the Shotgun
+                                    Write node (False) 
         """
         # get the embedded write node
         write_node = node.node(TankWriteNodeHandler.WRITE_NODE_NAME)
@@ -1074,8 +1098,23 @@ class TankWriteNodeHandler(object):
             write_node.knob("file_type").setValue("  ")
             return
 
+        # get a list of the settings we shouldn't update:
+        knobs_to_skip = set()
+        if not reset_all_settings:
+            # Skip setting any knobs on the internal Write node that are represented by knobs on the 
+            # containing Shotgun Write node.  These knobs are typically only set at first creation 
+            # time or when the profile is changed as the artist is then free to change them.
+            for knob_name in node.knobs():
+                knob = node.knob(knob_name)
+                if knob.node() == write_node:
+                    knobs_to_skip.add(knob_name)
+
         # now apply file format settings
         for setting_name, setting_value in file_settings.iteritems():
+            if setting_name in knobs_to_skip:
+                # skip this setting:
+                continue
+            
             knob = write_node.knob(setting_name)
             if knob is None:
                 self._app.log_error("%s is not a valid setting for file format %s. It will be ignored." 
@@ -1173,148 +1212,185 @@ class TankWriteNodeHandler(object):
 
     def __update_render_path(self, node, force_reset=False, is_proxy=False):
         """
-        Update the render path and the various feedback knobs
+        Update the render path and the various feedback knobs based on the current
+        context and other node settings.
+        
+        :param node:        The Shotgun Write node to update the path for
+        :param force_reset: Force the path to be reset regardless of any cached
+                            values
+        :param is_proxy:    If True then update the proxy render path, otherwise
+                            just update the normal render path.
+        :returns:           The updated render path
         """
-        # get the cached path without evaluating:
-        cached_path = (node.knob("tk_cached_proxy_path").toScript() if is_proxy
-                                else node.knob("cached_path").toScript())
-
-        if node in self.__currently_rendering_nodes:
-            # when rendering we don't want to re-evaluate the paths as doing
-            # so can cause problems!  Specifically, I found that accessing
-            # width, height or format on a node can cause the evaluation
-            # of the internal Write node file/proxy to not be evaluated!!
-            return cached_path
-            
-        reset_path_button_visible = False
-        path_warning = ""
-        render_path = None
-        cache_entry = None
         try:
-            # gather the render settings to use when computing the path:
-            render_template, width, height, output_name, colorspace_name = self.__gather_render_settings(node, is_proxy)
-            
-            # experimental settings cache to avoid re-computing the path
-            # if nothing has changed...
-            old_cache_entry, compute_path_error = (self.__node_computed_path_settings_cache.get((node, is_proxy))
-                                                   or (None, ""))
-            cache_entry = {
-                "ctx":self._app.context,
-                "width":width,
-                "height":height,
-                "output":output_name,
-                "colorspace":colorspace_name,
-                "script_path":nuke.root().name()
-            }
-            
-            if (not force_reset) and old_cache_entry and cache_entry == old_cache_entry:
-                # nothing of relevance has changed since the last time the path was
-                # computed so just use the cached path:
-                render_path = cached_path
-                
-                # if there was previously an error then raise it so that it gets reported properly:
-                if compute_path_error:
-                    raise TkComputePathError(compute_path_error)
-            else:
-                # compute the render path:
-                render_path = self.__compute_render_path_from(node, render_template, width, height, output_name, colorspace_name)
-                
-        except TkComputePathError, e:
-            # update cache:
-            self.__node_computed_path_settings_cache[(node, is_proxy)] = (cache_entry, str(e))
-            
-            # render path could not be computed for some reason - display warning
-            # to the user in the property editor:
-            path_warning += "<br>".join(self.__wrap_text(
-                    "The render path is currently frozen because Toolkit could not "
-                    "determine a valid path!  This was due to the following problem:", 60)) + "<br>"
-            path_warning += "<br>"
-            path_warning += ("&nbsp;&nbsp;&nbsp;" 
-                            + " <br>&nbsp;&nbsp;&nbsp;".join(self.__wrap_text(str(e), 57)) 
-                            + " <br>")
-            
-            if cached_path:
-                # have a previously cached path so we can at least still render:
-                path_warning += "<br>"
-                path_warning += "<br>".join(self.__wrap_text(
-                    "You can still render to the frozen path but you won't be able to "
-                    "publish this node!", 60))
-            
-            render_path = cached_path
-        else:
-            # update cache:
-            self.__node_computed_path_settings_cache[(node, is_proxy)] = (cache_entry, "")
-            
-            path_is_locked = False
-            if not force_reset:
-                path_is_locked = self.__is_render_path_locked(node, render_path, cached_path, is_proxy)
-            
-            if path_is_locked:
-                # render path was not what we expected!
-                path_warning += "<br>".join(self.__wrap_text(
-                    "The path does not match the current Shotgun Work Area.  You can "
-                    "still render but you will not be able to publish this node.", 60)) + "<br>"
-                path_warning += "<br>"
-                path_warning += "<br>".join(self.__wrap_text(
-                    "The path will be automatically reset next time you version-up, publish "
-                    "or click 'Reset Path'.", 60))
-                
-                reset_path_button_visible = True
-                render_path = cached_path
-            
-            if not path_is_locked or not cached_path:
-                self.__update_knob_value(node, "tk_cached_proxy_path" if is_proxy else "cached_path", render_path)
-                
-            # Also update the 'last known script' to be the current script
-            # this mechanism is used to determine if the script is being saved
-            # as a new file or as the same file in the onScriptSave callback
-            last_known_script_knob = node.knob("tk_last_known_script")
-            if force_reset or not last_known_script_knob.value():
-                last_known_script_knob.setValue(nuke.root().name())
+            # get the cached path without evaluating:
+            cached_path = (node.knob("tk_cached_proxy_path").toScript() if is_proxy
+                                    else node.knob("cached_path").toScript())
 
-        # Note that this method can get called to update the proxy render path when the node 
-        # isn't in proxy mode!  Because we only want to update the UI to represent the 'actual'
-        # state then we check for that here:  
-        if is_proxy == node.proxy():
+            if node in self.__currently_rendering_nodes:
+                # when rendering we don't want to re-evaluate the paths as doing
+                # so can cause problems!  Specifically, I found that accessing
+                # width, height or format on a node can cause the evaluation
+                # of the internal Write node file/proxy to not be evaluated!!
+                return cached_path
             
-            # update warning displayed to the user:
-            if path_warning:
-                path_warning = "<i style='color:orange'><b><br>Warning</b><br>%s</i><br>" % path_warning
-                self.__update_knob_value(node, "path_warning", path_warning)
-                node.knob("path_warning").setVisible(True)
-            else:
-                self.__update_knob_value(node, "path_warning", "")
-                node.knob("path_warning").setVisible(False)
-            node.knob("reset_path").setVisible(reset_path_button_visible)
-    
-            # show/hide proxy mode label depending if we're currently 
-            # rendering in proxy mode:
-            node.knob("tk_render_mode").setVisible(is_proxy)
-            
-            # update the render warning label if needed:
-            render_warning = ""
+            # it seems that querying certain things (e.g. node.width()) will sometimes cause the render 
+            # and proxy paths to be re-evaluated causing this function to be called recursively which
+            # can break things!  In case that happens we use some flags to track it so that the path
+            # only gets updated once.
             if is_proxy:
-                full_render_path = self.__get_render_path(node, False)
-                if full_render_path == render_path:
-                    render_warning = ("The full & proxy resolution render paths are currently the same.  "
-                                      "Rendering in proxy mode will overwrite any previously rendered "
-                                      "full-res frames!")
-            if render_warning:
-                self.__update_knob_value(node, "tk_render_warning", 
-                                         "<i style='color:orange'><b>Warning</b> <br>%s<i><br>" 
-                                         % "<br>".join(self.__wrap_text(render_warning, 60)))
-                node.knob("tk_render_warning").setVisible(True)
+                if self.__is_updating_proxy_path:
+                    return cached_path
+                else:
+                    self.__is_updating_proxy_path = True
             else:
-                self.__update_knob_value(node, "tk_render_warning", "")
-                node.knob("tk_render_warning").setVisible(False)
-            
-            # update output knobs:
-            self.__update_output_knobs(node)
+                if self.__is_updating_render_path:
+                    return cached_path
+                else:
+                    self.__is_updating_render_path = True
+    
+            # get the current script path:
+            script_path = self.__get_current_script_path()
+                
+            reset_path_button_visible = False
+            path_warning = ""
+            render_path = None
+            cache_entry = None
+            try:
+                # gather the render settings to use when computing the path:
+                render_template, width, height, output_name, colorspace_name = self.__gather_render_settings(node, is_proxy)
+                
+                # experimental settings cache to avoid re-computing the path
+                # if nothing has changed...
+                old_cache_entry, compute_path_error = self.__node_computed_path_settings_cache.get((node, is_proxy), 
+                                                                                                   (None, ""))
+                cache_entry = {
+                    "ctx":self._app.context,
+                    "width":width,
+                    "height":height,
+                    "output":output_name,
+                    "colorspace":colorspace_name,
+                    "script_path":script_path
+                }
+                
+                if (not force_reset) and old_cache_entry and cache_entry == old_cache_entry:
+                    # nothing of relevance has changed since the last time the path was
+                    # computed so just use the cached path:
+                    render_path = cached_path
+                    
+                    # if there was previously an error then raise it so that it gets reported properly:
+                    if compute_path_error:
+                        raise TkComputePathError(compute_path_error)
+                else:
+                    # compute the render path:
+                    render_path = self.__compute_render_path_from(node, render_template, width, height, output_name, colorspace_name)
+                    
+            except TkComputePathError, e:
+                # update cache:
+                self.__node_computed_path_settings_cache[(node, is_proxy)] = (cache_entry, str(e))
+                
+                # render path could not be computed for some reason - display warning
+                # to the user in the property editor:
+                path_warning += "<br>".join(self.__wrap_text(
+                        "The render path is currently frozen because Toolkit could not "
+                        "determine a valid path!  This was due to the following problem:", 60)) + "<br>"
+                path_warning += "<br>"
+                path_warning += ("&nbsp;&nbsp;&nbsp;" 
+                                + " <br>&nbsp;&nbsp;&nbsp;".join(self.__wrap_text(str(e), 57)) 
+                                + " <br>")
+                
+                if cached_path:
+                    # have a previously cached path so we can at least still render:
+                    path_warning += "<br>"
+                    path_warning += "<br>".join(self.__wrap_text(
+                        "You can still render to the frozen path but you won't be able to "
+                        "publish this node!", 60))
+                
+                render_path = cached_path
+            else:
+                # update cache:
+                self.__node_computed_path_settings_cache[(node, is_proxy)] = (cache_entry, "")
+                
+                path_is_locked = False
+                if not force_reset:
+                    # if we force-reset the path then it will never be locked, otherwise we need to test
+                    # to see if it is locked.  A path is considered locked if the render path differs
+                    # from the cached path ignoring certain dynamic fields (e.g. width, height).
+                    path_is_locked = self.__is_render_path_locked(node, render_path, cached_path, is_proxy)
+                
+                if path_is_locked:
+                    # render path was not what we expected!
+                    path_warning += "<br>".join(self.__wrap_text(
+                        "The path does not match the current Shotgun Work Area.  You can "
+                        "still render but you will not be able to publish this node.", 60)) + "<br>"
+                    path_warning += "<br>"
+                    path_warning += "<br>".join(self.__wrap_text(
+                        "The path will be automatically reset next time you version-up, publish "
+                        "or click 'Reset Path'.", 60))
+                    
+                    reset_path_button_visible = True
+                    render_path = cached_path
+                
+                if not path_is_locked or not cached_path:
+                    self.__update_knob_value(node, "tk_cached_proxy_path" if is_proxy else "cached_path", render_path)
+                    
+                # Also update the 'last known script' to be the current script
+                # this mechanism is used to determine if the script is being saved
+                # as a new file or as the same file in the onScriptSave callback
+                last_known_script_knob = node.knob("tk_last_known_script")
+                if force_reset or not last_known_script_knob.value():
+                    last_known_script_knob.setValue(script_path)
+    
+            # Note that this method can get called to update the proxy render path when the node 
+            # isn't in proxy mode!  Because we only want to update the UI to represent the 'actual'
+            # state then we check for that here:  
+            if is_proxy == node.proxy():
+                
+                # update warning displayed to the user:
+                if path_warning:
+                    path_warning = "<i style='color:orange'><b><br>Warning</b><br>%s</i><br>" % path_warning
+                    self.__update_knob_value(node, "path_warning", path_warning)
+                    node.knob("path_warning").setVisible(True)
+                else:
+                    self.__update_knob_value(node, "path_warning", "")
+                    node.knob("path_warning").setVisible(False)
+                node.knob("reset_path").setVisible(reset_path_button_visible)
+        
+                # show/hide proxy mode label depending if we're currently 
+                # rendering in proxy mode:
+                node.knob("tk_render_mode").setVisible(is_proxy)
+                
+                # update the render warning label if needed:
+                render_warning = ""
+                if is_proxy:
+                    full_render_path = self.__get_render_path(node, False)
+                    if full_render_path == render_path:
+                        render_warning = ("The full & proxy resolution render paths are currently the same.  "
+                                          "Rendering in proxy mode will overwrite any previously rendered "
+                                          "full-res frames!")
+                if render_warning:
+                    self.__update_knob_value(node, "tk_render_warning", 
+                                             "<i style='color:orange'><b>Warning</b> <br>%s<i><br>" 
+                                             % "<br>".join(self.__wrap_text(render_warning, 60)))
+                    node.knob("tk_render_warning").setVisible(True)
+                else:
+                    self.__update_knob_value(node, "tk_render_warning", "")
+                    node.knob("tk_render_warning").setVisible(False)
+                
+                # update output knobs:
+                self.__update_output_knobs(node)
+    
+                # finally, update preview:
+                self.__update_path_preview(node, is_proxy)
+    
+            return render_path           
 
-            # finally, update preview:
-            self.__update_path_preview(node, is_proxy)
-
-        return render_path           
+        finally:
+            # make sure we reset the update flag
+            if is_proxy:
+                self.__is_updating_proxy_path = False
+            else:
+                self.__is_updating_render_path = False
         
     def __get_render_path(self, node, is_proxy=False):
         """
@@ -1366,10 +1442,10 @@ class TankWriteNodeHandler(object):
         this currently doesn't work if there is an upstream reformat node set to
         anything other than a format (e.g. scale, box)!
         """
-        root = nuke.root()
-        if not root:
+        if not nuke.exists("root"):
             return
-    
+        root = nuke.root()
+        
         # calculate scale and offset to apply for proxy    
         scale_x = scale_y = 1.0
         offset_x = offset_y = 0.0
@@ -1484,17 +1560,14 @@ class TankWriteNodeHandler(object):
         if not render_template:
             raise TkComputePathError("Unable to determine the render template to use!")
         
-        # make sure we have a valid nuke root node: 
-        root_node = nuke.root()
-        if not root_node:
-            return ""
+        # get the current script path:
+        curr_filename = self.__get_current_script_path()
 
         # create fields dict with all the metadata
         #
         
         # extract the work fields from the script path using the work_file template:
         fields = {}
-        curr_filename = root_node.name().replace("/", os.path.sep)
         if self._script_template and self._script_template.validate(curr_filename):
             fields = self._script_template.get_fields(curr_filename)
         if not fields:
@@ -1509,6 +1582,12 @@ class TankWriteNodeHandler(object):
         # add in width & height:
         fields["width"] = width
         fields["height"] = height
+
+        # add in date values for YYYY, MM, DD
+        today = datetime.date.today()
+        fields["YYYY"] = today.year
+        fields["MM"] = today.month
+        fields["DD"] = today.day
 
         # validate the output name - be backwards compatible with 'channel' as well
         for key_name in ["output", "channel"]:
@@ -1584,7 +1663,7 @@ class TankWriteNodeHandler(object):
                             path_is_locked = True
                             break
                         
-                        if name in ["width", "height", "colorspace"]:
+                        if name in ["width", "height", "colorspace", "YYYY", "MM", "DD"]:
                             # ignore these as they are free to change!
                             continue
                         elif prev_fields[name] != value:
@@ -1597,23 +1676,46 @@ class TankWriteNodeHandler(object):
         """
         Setup a node when it's created (either directly or as a result of loading a script).  This
         allows us to dynamically populate the profile list.
+        
+        :param node:    The Shotgun Write Node to set up
         """
+        # check that this node is actually a Gizmo.  It might not be if 
+        # it was created/loaded when the Gizmo wasn't available!
+        if not isinstance(node, nuke.Gizmo):
+            return
+        
+        if self.__is_node_fully_constructed(node):
+            # node has already been constructed for this session!
+            return
+        
         self._app.log_debug("Setting up new node...")
         
-        # populate the profiles list as this isn't stored with the file:
+        # populate the profiles list as this isn't stored with the file and is
+        # dynamic based on the users configuration
         profile_names = list(self._profile_names)
         current_profile_name = self.get_node_profile_name(node)
         if current_profile_name and current_profile_name not in self._profiles:
-            # profile no longer exists but we need to handle this:
-            current_profile_name = "%s [Invalid]" % current_profile_name
+            # profile no longer exists but we need to handle this so add it
+            # to the list:
+            current_profile_name = "%s [Not Found]" % current_profile_name
             profile_names.insert(0, current_profile_name)
-        node.knob("tk_profile_list").setValues(profile_names)
+            
+        list_profiles = node.knob("tk_profile_list").values()
+        if list_profiles != profile_names:
+            node.knob("tk_profile_list").setValues(profile_names)
         
-        if current_profile_name:
-            # ensure that the correct entry is selected from the list:
-            self.__update_knob_value(node, "tk_profile_list", current_profile_name)
-            # and make sure the node is up-to-date with the profile:
-            self.__set_profile(node, current_profile_name)
+        reset_all_profile_settings = False
+        if not current_profile_name:
+            # default to first profile:
+            current_profile_name = node.knob("tk_profile_list").value()
+            # and as this node has never had a profile set, lets make
+            # sure we reset all settings 
+            reset_all_profile_settings = True 
+        
+        # ensure that the correct entry is selected from the list:
+        self.__update_knob_value(node, "tk_profile_list", current_profile_name)
+        # and make sure the node is up-to-date with the profile:
+        self.__set_profile(node, current_profile_name, reset_all_settings=reset_all_profile_settings)
         
         # ensure that the disable value properly propogates to the internal write node:
         write_node = node.node(TankWriteNodeHandler.WRITE_NODE_NAME)
@@ -1675,12 +1777,10 @@ class TankWriteNodeHandler(object):
         mechanism allows the code to ignore other callbacks that may fail because things aren't set
         up correctly (e.g. knobChanged calls for default values when loading a script).
         """
-        try:
-            return node.knob("tk_is_fully_constructed").value()            
-        except ValueError:
-            # it seems that nuke sometimes calls callbacks before it's finished setting
-            # up a node enough to be accessed - this catches that error and ignores it
+        if not node.knob("tk_is_fully_constructed"):
             return False
+        
+        return node.knob("tk_is_fully_constructed").value()
     
     def __on_knob_changed(self):
         """
@@ -1705,7 +1805,7 @@ class TankWriteNodeHandler(object):
         if knob.name() == "tk_profile_list":
             # change the profile for the specified node:
             new_profile_name = knob.value()
-            self.__set_profile(node, new_profile_name)
+            self.__set_profile(node, new_profile_name, reset_all_settings=True)
             
         elif knob.name() == TankWriteNodeHandler.OUTPUT_KNOB_NAME:
             # internal cached output has been changed!
@@ -1751,6 +1851,40 @@ class TankWriteNodeHandler(object):
                 
                 write_node.knob(knob_name).setValue(nuke.thisKnob().value())
 
+    def __get_current_script_path(self):
+        """
+        Get the current script path (if the current script has been saved).  This will
+        use the nuke.scriptName() call if available (Nuke 8+ ?) otherwise it will fall
+        back to the slightly less safe nuke.root().name() - this will result in an
+        internal error (not a catchable exception) if the root object doesn't yet exist
+        (e.g. whilst the file is being loaded).
+        
+        :returns:   The current Nuke script path or None if the script hasn't been
+                    saved yet.  The path will have os-correct slashes
+        """
+        script_path = None
+        if hasattr(nuke, "scriptName"):
+            # scriptName method is new for Nuke 8
+            try:
+                script_path = nuke.scriptName()
+            except:
+                # script has never been saved!
+                script_path = None
+        else:
+            # check nuke.root - note that this isn't safe to do if
+            # the root node hasn't been created yet!
+            if nuke.exists("root"):
+                script_path = nuke.root().name()
+                if script_path == "Root":
+                    script_path = None
+            
+        if script_path:
+            # convert to os-style slashes:
+            script_path = script_path.replace("/", os.path.sep)
+            
+        return script_path
+                
+
     def __on_script_save(self):
         """
         Called when the script is saved.
@@ -1758,14 +1892,22 @@ class TankWriteNodeHandler(object):
         Iterates over the Shotgun write nodes in the scene.  If the script is being saved as
         a new file then it resets all render paths before saving
         """
-        save_file_path = nuke.root().name()
-        if save_file_path == "Root":
-            # don't think this should ever be the case!
-            return        
+        save_file_path = self.__get_current_script_path()
+        if not save_file_path:
+            # script has never been saved as anything!
+            return
         
         for n in self.get_nodes():
-            # check to see if the script is being saved to a new file or the same file: 
-            last_known_path = n.knob("tk_last_known_script").value()
+            # check to see if the script is being saved to a new file or the same file:
+            knob = n.knob("tk_last_known_script")
+            if not knob:
+                continue
+             
+            last_known_path = knob.value()
+            if last_known_path:
+                # correct slashes for compare:
+                last_known_path = last_known_path.replace("/", os.path.sep)
+                
             if last_known_path != save_file_path:
                 # we're saving to a new file so reset the render path:
                 try:
@@ -1773,4 +1915,32 @@ class TankWriteNodeHandler(object):
                 except:
                     # don't want any exceptions to stop the save!
                     pass
+                
+    def __on_user_create(self):
+        """
+        Called when the user creates a Shotgun Write node.  Not called when loading
+        or pasting a script.
+        """
+        node = nuke.thisNode()
+        
+        # check that this node is actually a Gizmo.  It might not be if 
+        # it was created/loaded when the Gizmo wasn't available!
+        if not isinstance(node, nuke.Gizmo):
+            # it's not so we can't do anything!
+            return
+        
+        # setup the new node:
+        self.__setup_new_node(node)
+        
+        # populate the initial output name based on the render template:
+        render_template = self.get_render_template(node)
+        self.__populate_initial_output_name(render_template, node)
 
+
+
+
+
+
+
+        
+        

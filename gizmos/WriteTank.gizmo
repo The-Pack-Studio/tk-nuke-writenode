@@ -187,32 +187,24 @@ Gizmo {
     -STARTLINE
  }
  
+ addUserKnob {
+    26 "" 
+    l "" 
+    +STARTLINE
+ }
 
  addUserKnob {
-    26 OCIO
+    26 OCIOINFOA
+    l "OCIO :"
+    t "This shows the in and out colorspaces being used in the OCIO node embedded in the shotgun writenode."
  }
+
  addUserKnob {
-    41 in_colorspace
-    l "in"
-    T OCIOColorSpace1.in_colorspace
+    26 OCIOINFOB
+    l ""
+    +STARTLINE
  }
- addUserKnob {
-    26 EVENT
-    l "Event : "
-    t "Event name used by OCIO to apply the correct lut's (i.e. if the lut is shot specific)"
-    -STARTLINE
- }
- addUserKnob {
-    41 out_colorspace
-    l "out"
-    T OCIOColorSpace1.out_colorspace
- }
- addUserKnob {
-    26 CAMERA
-    l "Camera colorspace : "
-    t "Camera colorspace defined in Shotgun database"
-    -STARTLINE
- }
+
  addUserKnob {
     6 ocio_unpremult
     l premultiplied
@@ -222,7 +214,7 @@ Gizmo {
  addUserKnob {
     6 ocio_disable
     l "disable internal OCIO"
-    t "Kill switch for the internal OCIO node!\nUsed to override the colorspace conversion.\n\nIn other words if you check this box you will disable any color conversion inside the Write node, but the 'out' colorspace will be used in the name of the rendered images."
+    t "Kill switch for the internal OCIO node!\nUsed to override the colorspace conversion.\n\nIn other words if you check this box you will disable any color conversion inside the Write node, but the 'out' colorspace name will be used in the filename of the rendered images."
     -STARTLINE
  }
 
@@ -327,7 +319,7 @@ Gizmo {
 
  knobChanged "import nuke\nif hasattr(nuke, \"_shotgun_write_node_handler\"):\n    nuke._shotgun_write_node_handler.on_knob_changed_gizmo_callback()"
  onCreate "import nuke\nif hasattr(nuke, \"_shotgun_write_node_handler\"):\n    nuke._shotgun_write_node_handler.on_node_created_gizmo_callback()"
- label "\[python nuke.thisNode().knob('in_colorspace').value()] to \[python nuke.thisNode().knob('out_colorspace').value()]"
+ label "\[python nuke.thisNode().knob('tk_profile_list').value()]"
 }
  Input {
   inputs 0
@@ -353,12 +345,7 @@ Gizmo {
  OCIOColorSpace {
   in_colorspace linear
   out_colorspace linear
-  key1 EVENT
-  value1 "\[python nuke.thisParent().knob('EVENT').value()]"
-  key2 CAMERA
-  value2 "\[python nuke.thisParent().knob('CAMERA').value()]"
   name OCIOColorSpace1
-  label "\[python nuke.thisParent().knob('EVENT').toScript()]"
   xpos 195
   ypos -32
   disable {{parent.ocio_disable}}

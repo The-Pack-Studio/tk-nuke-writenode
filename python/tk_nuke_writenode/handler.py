@@ -63,6 +63,9 @@ class TankWriteNodeHandler(object):
         self.__currently_rendering_nodes = set()
         self.__node_computed_path_settings_cache = {}
         self.__path_preview_cache = {}
+
+        # get the camera colorspace from Shotgun. donat
+        self.cameraColorspace = self.__getCameraColorspaceFromShotgun()
             
     ################################################################################################
     # Properties
@@ -806,6 +809,10 @@ class TankWriteNodeHandler(object):
         """
         Updates the path preview fields on the tank write node.
         """
+
+        self.__setOCIOInfoOnGizmo(node)
+
+
         # first set up the node label
         # this will be displayed on the node in the graph
         # useful to tell what type of node it is
@@ -826,8 +833,6 @@ class TankWriteNodeHandler(object):
             context_path = cached_path_preview["context_path"]
             local_path = cached_path_preview["local_path"]
             file_name = cached_path_preview["file_name"]
-            event = cached_path_preview["event"]
-            cameraColorspace = cached_path_preview["cameraColorspace"]
         else:
             # normalize the path for os platform
             norm_path = path.replace("/", os.sep)
@@ -859,19 +864,11 @@ class TankWriteNodeHandler(object):
                 # e.g. for path   /mnt/proj/shotXYZ/renders/v003/hello.%04d.exr
                 # context_path:   /mnt/proj/shotXYZ/renders/v003
                 # local_path:
-
-            event = self._app.context.entity['name']
-            self.__update_knob_value(node, "EVENT", event)
-            cameraColorspace = self.__getCameraColorspaceFromShotgun()
-            self.__update_knob_value(node, "CAMERA", cameraColorspace)
-
-
-
+    
             self.__path_preview_cache[cache_key] = {"context_path":context_path, 
                                                     "local_path":local_path, 
-                                                    "file_name":file_name,
-                                                    "event":event,
-                                                    "cameraColorspace":cameraColorspace}
+                                                    "file_name":file_name}
+    
         # update the preview knobs - note, not sure why but
         # under certain circumstances the property editor doesn't
         # update correctly - hiding and showing the knob seems to
@@ -951,7 +948,6 @@ class TankWriteNodeHandler(object):
         ocio_colorspace_in = profile["ocio_colorspace_in"]
         ocio_colorspace_out = profile["ocio_colorspace_out"]
         tile_color = profile["tile_color"]
-
 
         # Make sure any invalid entries are removed from the profile list:
         list_profiles = node.knob("tk_profile_list").values()
@@ -1095,17 +1091,30 @@ class TankWriteNodeHandler(object):
     def __populate_ocio_knobs(self, node, ocio_colorspace_in, ocio_colorspace_out):  # donat
         '''
         Controls the OCIO knobs of the gizmo
+        Sets the colorspace in and out and the context variables
         '''
         
+        event = self._app.context.entity['name']
+
         if "camera" in ocio_colorspace_in:
-            ocio_colorspace_in = self.__getCameraColorspaceFromShotgun()
+            ocio_colorspace_in = self.cameraColorspace
         if "camera" in ocio_colorspace_out:
-            ocio_colorspace_out = self.__getCameraColorspaceFromShotgun()
+            ocio_colorspace_out = self.cameraColorspace
 
         if ocio_colorspace_in == 'Unspecified' or ocio_colorspace_out == 'Unspecified':
             self._app.log_error("The Camera colorspace field in Shotgun is emtpy, please set the value on the Shot Info page")
             return
                                    
+        # get the embedded ocio node:
+        ocio_node = node.node(TankWriteNodeHandler.OCIO_NODE_NAME)
+
+
+        # set the context variables of the OCIO node
+        
+        ocio_node.knob('key1').setValue('EVENT')
+        ocio_node.knob('value1').setValue(event)
+        ocio_node.knob('key2').setValue('CAMERA')
+        ocio_node.knob('value2').setValue(self.cameraColorspace)      
 
 
         # get the embedded ocio node:
@@ -1197,7 +1206,7 @@ class TankWriteNodeHandler(object):
                 "colorspace":colorspace_name,
                 "script_path":nuke.root().name()
             }
-
+            
             if (not force_reset) and old_cache_entry and cache_entry == old_cache_entry:
                 # nothing of relevance has changed since the last time the path was
                 # computed so just use the cached path:
@@ -1438,7 +1447,8 @@ class TankWriteNodeHandler(object):
                 output_name = node.knob(TankWriteNodeHandler.OUTPUT_KNOB_NAME).value()
             
             if "colorspace" in render_template.keys:
-                colorspace_name = node.knob('out_colorspace').value()
+                ocio_node = node.node(TankWriteNodeHandler.OCIO_NODE_NAME)
+                colorspace_name = ocio_node.knob('out_colorspace').value()
 
         return (render_template, width, height, output_name, colorspace_name)
 
@@ -1614,14 +1624,33 @@ class TankWriteNodeHandler(object):
         node.knob("tk_is_fully_constructed").setValue(True)
         node.knob("tk_is_fully_constructed").setEnabled(False)
 
-        # setting the event name and the camera colorspace when the shotgun write node is created
+        # set ocio info on the gizmo
+        self.__setOCIOInfoOnGizmo(node)
+
+
+    def __setOCIOInfoOnGizmo(self, node): # donat
+        '''
+        Sets the relevant OCIO info on the properties panel of the shotgun writenode
+        '''
         event = self._app.context.entity['name']
-        self.__update_knob_value(node, "EVENT", event)
-        cameraColorspace = self.__getCameraColorspaceFromShotgun()
-        self.__update_knob_value(node, "CAMERA", cameraColorspace)
 
+        # get the embedded ocio node (donat)
+        ocio_node = node.node(TankWriteNodeHandler.OCIO_NODE_NAME)
+        cIn = ocio_node.knob('in_colorspace').value()
+        cOut = ocio_node.knob('out_colorspace').value()
+        # updating text knobs on the gizmo
+        ocioInfoA = "Converting from <b>%s</b> to <b>%s</b>," % (cIn, cOut)
+        self.__update_knob_value(node, "OCIOINFOA", ocioInfoA)
+        ocioInfoB = "using luts from %s (camera colorspace is %s)" % (event, self.cameraColorspace)
+        self.__update_knob_value(node, "OCIOINFOB", ocioInfoB)
 
-    def __getCameraColorspaceFromShotgun(self): #Donat
+    def __getCameraColorspaceFromShotgun(self):
+        '''
+        Get the Camera Colorspace (should be called the grading colorspace) using
+        a shotgun api call. This method is called once in the init of the class because accessing
+        Shotgun's database is slow
+        Donat
+        '''
 
         entity = self._app.context.entity
 
@@ -1664,7 +1693,7 @@ class TankWriteNodeHandler(object):
         node = nuke.thisNode()
         knob = nuke.thisKnob()
         grp = nuke.thisGroup()
-
+        
         if not self.__is_node_fully_constructed(node):
             # knobChanged will be called during script load for all knobs with non-default 
             # values.  We want to ignore these implicit changes so we make use of a knob to

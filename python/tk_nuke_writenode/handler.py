@@ -355,6 +355,13 @@ class TankWriteNodeHandler(object):
         """
         Utility function to convert all Shotgun Write nodes to regular
         Nuke Write nodes.
+        
+        # Example use:
+        import sgtk
+        eng = sgtk.platform.current_engine()
+        app = eng.apps["tk-nuke-writenode"]
+        # Convert Shotgun write nodes to Nuke write nodes:
+        app.convert_to_write_nodes()
         """
         # clear current selection:
         nukescripts.clear_selection_recursive()
@@ -446,6 +453,14 @@ class TankWriteNodeHandler(object):
         Utility function to convert all Nuke Write nodes to Shotgun
         Write nodes (only converts Write nodes that were previously
         Shotgun Write nodes)
+
+        # Example use:
+        import sgtk
+        eng = sgtk.platform.current_engine()
+        app = eng.apps["tk-nuke-writenode"]
+        # Convert previously converted Nuke write nodes back to 
+        # Shotgun write nodes:
+        app.convert_from_write_nodes()
         """
         # clear current selection:
         nukescripts.clear_selection_recursive()
@@ -491,14 +506,20 @@ class TankWriteNodeHandler(object):
             new_sg_wn["proxy_publish_template"].setValue(proxy_publish_template_knob.value())
             
             # set the profile & output - this will cause the paths to be reset:
-            new_sg_wn["profile_name"].setValue(profile_knob.value())
+            # Note, we don't call the method __set_profile() as we don't want to
+            # run all the normal logic that runs as part of switching the profile.
+            # Instead we want this node to be rebuilt as close as possible to the
+            # original before it was converted to a regular Nuke write node.
+            profile_name = profile_knob.value()
+            new_sg_wn["profile_name"].setValue(profile_name)
+            new_sg_wn["tk_profile_list"].setValue(profile_name)
             new_sg_wn[TankWriteNodeHandler.OUTPUT_KNOB_NAME].setValue(output_knob.value())
             new_sg_wn[TankWriteNodeHandler.USE_NAME_AS_OUTPUT_KNOB_NAME].setValue(use_name_as_output_knob.value())
 
             # make sure file_type is set properly:
             int_wn = new_sg_wn.node(TankWriteNodeHandler.WRITE_NODE_NAME)
             int_wn["file_type"].setValue(wn["file_type"].value())
-                   
+
             # copy across and knob values from the internal write node.
             for knob_name, knob in wn.knobs().iteritems():
                 # skip knobs we don't want to copy:
@@ -525,9 +546,6 @@ class TankWriteNodeHandler(object):
             new_sg_wn.setName(node_name)
             new_sg_wn.setXpos(node_pos[0])
             new_sg_wn.setYpos(node_pos[1])       
-
-            # run this one last time to ensure the profile list is constructed correctly:
-            self.__setup_new_node(new_sg_wn)
 
 
     ################################################################################################
@@ -1260,10 +1278,9 @@ class TankWriteNodeHandler(object):
                 # gather the render settings to use when computing the path:
                 render_template, width, height, output_name, colorspace_name = self.__gather_render_settings(node, is_proxy)
                 
-                # experimental settings cache to avoid re-computing the path
-                # if nothing has changed...
-                old_cache_entry, compute_path_error = self.__node_computed_path_settings_cache.get((node, is_proxy), 
-                                                                                                   (None, ""))
+                # experimental settings cache to avoid re-computing the path if nothing has changed...
+                cache_item = self.__node_computed_path_settings_cache.get((node, is_proxy), (None, "", ""))
+                old_cache_entry, compute_path_error, render_path = cache_item
                 cache_entry = {
                     "ctx":self._app.context,
                     "width":width,
@@ -1274,10 +1291,7 @@ class TankWriteNodeHandler(object):
                 }
                 
                 if (not force_reset) and old_cache_entry and cache_entry == old_cache_entry:
-                    # nothing of relevance has changed since the last time the path was
-                    # computed so just use the cached path:
-                    render_path = cached_path
-                    
+                    # nothing of relevance has changed since the last time the path was changed!
                     # if there was previously an error then raise it so that it gets reported properly:
                     if compute_path_error:
                         raise TkComputePathError(compute_path_error)
@@ -1287,7 +1301,7 @@ class TankWriteNodeHandler(object):
                     
             except TkComputePathError, e:
                 # update cache:
-                self.__node_computed_path_settings_cache[(node, is_proxy)] = (cache_entry, str(e))
+                self.__node_computed_path_settings_cache[(node, is_proxy)] = (cache_entry, str(e), "")
                 
                 # render path could not be computed for some reason - display warning
                 # to the user in the property editor:
@@ -1309,7 +1323,7 @@ class TankWriteNodeHandler(object):
                 render_path = cached_path
             else:
                 # update cache:
-                self.__node_computed_path_settings_cache[(node, is_proxy)] = (cache_entry, "")
+                self.__node_computed_path_settings_cache[(node, is_proxy)] = (cache_entry, "", render_path)
                 
                 path_is_locked = False
                 if not force_reset:

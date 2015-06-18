@@ -379,9 +379,12 @@ class TankWriteNodeHandler(object):
             new_wn = nuke.createNode("Write")
             new_wn.setSelected(False)
         
-            # copy across file & proxy knobs:
+            # copy across file & proxy knobs (if we've defined a proxy template):
             new_wn["file"].setValue(sg_wn["cached_path"].evaluate())
-            new_wn["proxy"].setValue(sg_wn["tk_cached_proxy_path"].evaluate())
+            if sg_wn["proxy_render_template"].value():
+                new_wn["proxy"].setValue(sg_wn["tk_cached_proxy_path"].evaluate())
+            else:
+                new_wn["proxy"].setValue("")
 
             # make sure file_type is set properly:
             int_wn = sg_wn.node(TankWriteNodeHandler.WRITE_NODE_NAME)
@@ -1582,7 +1585,7 @@ class TankWriteNodeHandler(object):
         
         # extract the work fields from the script path using the work_file template:
         fields = {}
-        if self._script_template and self._script_template.validate(curr_filename):
+        if curr_filename and self._script_template and self._script_template.validate(curr_filename):
             fields = self._script_template.get_fields(curr_filename)
         if not fields:
             raise TkComputePathError("The current script is not a Shotgun Work File!")

@@ -49,6 +49,7 @@ class TankWriteNodeHandler(object):
         self._script_template = self._app.get_template("template_script_work")
         
         # cache the profiles:
+        self._promoted_knobs = {}
         self._profile_names = []
         self._profiles = {}
         for profile in self._app.get_setting("write_nodes", []):
@@ -60,7 +61,7 @@ class TankWriteNodeHandler(object):
             
             self._profile_names.append(name)
             self._profiles[name] = profile
-            
+        
         self.__currently_rendering_nodes = set()
         self.__node_computed_path_settings_cache = {}
         self.__path_preview_cache = {}
@@ -988,6 +989,7 @@ class TankWriteNodeHandler(object):
         ocio_colorspace_in = profile["ocio_colorspace_in"]
         ocio_colorspace_out = profile["ocio_colorspace_out"]
         tile_color = profile["tile_color"]
+        promote_write_knobs = profile.get("promote_write_knobs", [])
 
         # Make sure any invalid entries are removed from the profile list:
         list_profiles = node.knob("tk_profile_list").values()
@@ -1008,6 +1010,44 @@ class TankWriteNodeHandler(object):
 
         # set ocio colorspace in and out knobs
         self.__populate_ocio_knobs(node, ocio_colorspace_in, ocio_colorspace_out)
+
+        # Hide the promoted knobs that might exist from the previously
+        # active profile.
+        for promoted_knob in self._promoted_knobs.get(node, []):
+            promoted_knob.setFlag(nuke.INVISIBLE)
+        self._promoted_knobs[node] = []
+        write_node = node.node(TankWriteNodeHandler.WRITE_NODE_NAME)
+        # We'll use link knobs to tie our top-level knob to the write node's
+        # knob that we want to promote.
+        for i, knob_name in enumerate(promote_write_knobs):
+            target_knob = write_node.knob(knob_name)
+            if not target_knob:
+                self._app.log_warning("Knob %s does not exist and will not be promoted." % knob_name)
+                continue
+            link_name = "_promoted_" + str(i)
+            # We have 20 link knobs stashed away to use.  If we overflow that
+            # then we will simply create a new link knob and deal with the
+            # fact that it will end up in a "User" tab in the UI. The reason
+            # that we store a gaggle of link knobs on the gizmo is that it's
+            # the only way to present the promoted knobs in the write node's
+            # primary tab.  Adding knobs after the node exists results in them
+            # being shoved into a "User" tab all by themselves, which is lame.
+            if i > 19:
+                link_knob = nuke.Link_Knob(link_name)
+            else:
+                # We have to pull the link knobs from the knobs dict rather than
+                # by name, otherwise we'll get the link target and not the link
+                # itself if this is a link that was previously used.
+                link_knob = node.knobs()[link_name]
+            link_knob.setLink(target_knob.fullyQualifiedName())
+            label = target_knob.label() or knob_name
+            link_knob.setLabel(label)
+            link_knob.clearFlag(nuke.INVISIBLE)
+            self._promoted_knobs[node].append(link_knob)
+        # Adding knobs might have caused us to jump tabs, so we will set
+        # back to the first tab.
+        if len(promote_write_knobs) > 19:
+            node.setTab(0)
 
         # write the template name to the node so that we know it later
         self.__update_knob_value(node, "render_template", render_template.name)

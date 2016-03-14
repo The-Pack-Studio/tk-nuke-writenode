@@ -1251,7 +1251,7 @@ class TankWriteNodeHandler(object):
             ocio_colorspace_out = self.cameraColorspace
 
         if ocio_colorspace_in == 'Unspecified' or ocio_colorspace_out == 'Unspecified':
-            self._app.log_error("The Camera colorspace field in Shotgun is emtpy, please set the value on the Shot Info page")
+            self._app.log_warning("The Camera colorspace field in Shotgun is empty, please set the value on the Shot Info page")
             return
                                    
         # get the embedded ocio node:

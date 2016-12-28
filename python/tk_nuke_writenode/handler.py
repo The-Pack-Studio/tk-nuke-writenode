@@ -1263,6 +1263,7 @@ class TankWriteNodeHandler(object):
         '''
         
         event = self._app.context.entity['name']
+        sequence = self._app.context.as_template_fields(self._app.sgtk.templates['nuke_shot_work'])['Sequence']
 
         if "camera" in ocio_colorspace_in:
             ocio_colorspace_in = self.cameraColorspace
@@ -1282,7 +1283,10 @@ class TankWriteNodeHandler(object):
         ocio_node.knob('key1').setValue('EVENT')
         ocio_node.knob('value1').setValue(event)
         ocio_node.knob('key2').setValue('CAMERA')
-        ocio_node.knob('value2').setValue(self.cameraColorspace)      
+        ocio_node.knob('value2').setValue(self.cameraColorspace)
+        ocio_node.knob('key3').setValue('SEQUENCE')
+        ocio_node.knob('value3').setValue(sequence)
+
 
 
         # get the embedded ocio node:
@@ -1872,6 +1876,7 @@ class TankWriteNodeHandler(object):
         Sets the relevant OCIO info on the properties panel of the shotgun writenode
         '''
         event = self._app.context.entity['name']
+        sequence = self._app.context.as_template_fields(self._app.sgtk.templates['nuke_shot_work'])['Sequence']
 
         # get the embedded ocio node (donat)
         ocio_node = node.node(TankWriteNodeHandler.OCIO_NODE_NAME)
@@ -1880,7 +1885,7 @@ class TankWriteNodeHandler(object):
         # updating text knobs on the gizmo
         ocioInfoA = "Converting from <b>%s</b> to <b>%s</b>," % (cIn, cOut)
         self.__update_knob_value(node, "OCIOINFOA", ocioInfoA)
-        ocioInfoB = "using luts from %s (camera colorspace is %s)" % (event, self.cameraColorspace)
+        ocioInfoB = "using luts for shot %s (seq %s). camera colorspace is %s" % (event, sequence, self.cameraColorspace)
         self.__update_knob_value(node, "OCIOINFOB", ocioInfoB)
 
     def __getCameraColorspaceFromShotgun(self):

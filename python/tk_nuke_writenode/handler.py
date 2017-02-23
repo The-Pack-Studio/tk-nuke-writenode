@@ -1263,7 +1263,11 @@ class TankWriteNodeHandler(object):
         '''
         
         event = self._app.context.entity['name']
-        sequence = self._app.context.as_template_fields(self._app.sgtk.templates['nuke_shot_work'])['Sequence']
+        sequence = ''
+        try:
+            sequence = self._app.context.as_template_fields(self._app.sgtk.templates['nuke_shot_work'])['Sequence']
+        except:
+            self._app.log_debug("No sequence name found in the template of nuke_shot_work")
 
         if "camera" in ocio_colorspace_in:
             ocio_colorspace_in = self.cameraColorspace
@@ -1876,7 +1880,11 @@ class TankWriteNodeHandler(object):
         Sets the relevant OCIO info on the properties panel of the shotgun writenode
         '''
         event = self._app.context.entity['name']
-        sequence = self._app.context.as_template_fields(self._app.sgtk.templates['nuke_shot_work'])['Sequence']
+        sequence = ''
+        try:
+            sequence = self._app.context.as_template_fields(self._app.sgtk.templates['nuke_shot_work'])['Sequence']
+        except:
+            self._app.log_debug("No sequence name found in the template of nuke_shot_work")
 
         # get the embedded ocio node (donat)
         ocio_node = node.node(TankWriteNodeHandler.OCIO_NODE_NAME)

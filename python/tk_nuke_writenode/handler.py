@@ -1277,6 +1277,10 @@ class TankWriteNodeHandler(object):
                 self._app.log_error("Could not set %s file format setting %s to '%s'. Instead the value was set to '%s'" 
                                     % (file_type, setting_name, setting_value, knob.value()))
 
+        # Donat : force 'all metadata' when file type is exr
+        if file_type == 'exr':
+            write_node.knob('metadata').setValue('all metadata')
+
     
     def __populate_ocio_knobs(self, node, ocio_colorspace_in, ocio_colorspace_out):  # donat
         '''

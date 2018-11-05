@@ -22,7 +22,6 @@ import nukescripts
 import tank
 from tank import TankError
 from tank.platform import constants
-from tank.platform.qt import QtCore
 
 # Special exception raised when the work file cannot be resolved.
 class TkComputePathError(TankError):
@@ -382,6 +381,9 @@ class TankWriteNodeHandler(object):
         app = eng.apps["tk-nuke-writenode"]
         # Convert Shotgun write nodes to Nuke write nodes:
         app.convert_to_write_nodes()
+
+        :param create_folders: When set to true, it will create the folders on disk for the render and proxy paths.
+         Defaults to false.
         """
         # clear current selection:
         nukescripts.clear_selection_recursive()
@@ -423,6 +425,10 @@ class TankWriteNodeHandler(object):
                     except TypeError:
                         # ignore type errors:
                         pass
+
+            # Set the nuke write node to have create directories ticked on by default
+            # As toolkit hasn't created the output folder at this point.
+            new_wn["create_directories"].setValue(True)
         
             # copy across select knob values from the Shotgun Write node:
             for knob_name in ["tile_color", "postage_stamp", "label"]:
@@ -587,27 +593,14 @@ class TankWriteNodeHandler(object):
         be when the node is created for the first time or when it is loaded
         or imported/pasted from an existing script.
         """
-        current_node = nuke.thisNode()
-
-        # We're doing something different here. We have a situation where the
-        # logic in __setup_new_node might trigger an exception being raised in
-        # Nuke's framebuffer subprocess, which makes its way to the console. It
-        # doesn't break anything, but it's impossible to snuff it out since it
-        # is occurring in a different process from us here. What this is doing
-        # is staging the node created callback such that it's called slowly
-        # over a period of a couple hundred milliseconds, while giving Nuke's
-        # event loop the opportunity to iterate a couple times between phases
-        # execution. A side effect of this is that the render paths are sometimes
-        # not properly reset, most notably during some Snapshot restores. As
-        # a result, we also call the reset_render_path method to ensure everything
-        # is good there.
-        calling_function = yield
-        QtCore.QTimer.singleShot(100, calling_function.next)
-        yield
-        self.__setup_new_node(current_node)
-        self.reset_render_path(current_node)
-        yield
-
+        # NOTE: Future self or other person: every time we touch this method to
+        # try to fix one of the PythonObject ValueErrors that Nuke occasionally
+        # raises on file open, it breaks something for someone. Most recently, it
+        # was farm setups for a few clients. It's best if we just leave this
+        # alone from now on, unless we someday have a better understanding of
+        # what's going on and the consequences of changing the on_node_created
+        # behavior.
+        self.__setup_new_node(nuke.thisNode())
 
     def on_compute_path_gizmo_callback(self):
         """
@@ -1285,7 +1278,7 @@ class TankWriteNodeHandler(object):
         # all non-default knob values in a hidden knob "tk_write_node_settings".
         # Right here, we are deserializing that data and reapplying it to
         # the internal write node.
-        if not reset_all_settings and promoted_write_knobs:
+        if not reset_all_settings:
             tcl_settings = node.knob("tk_write_node_settings").value()
 
             if tcl_settings:
@@ -1320,7 +1313,8 @@ class TankWriteNodeHandler(object):
                 self._app.log_debug(
                     "Promoted write node knob settings to be applied: %s" % filtered_settings
                 )
-                write_node.readKnobs(r"\n".join(filtered_settings))
+                write_node.readKnobs("\n".join(filtered_settings))
+                self.reset_render_path(node)
 
     def __populate_ocio_knobs(self, node, ocio_colorspace_in, ocio_colorspace_out):  # donat
         '''
@@ -1870,8 +1864,18 @@ class TankWriteNodeHandler(object):
                 
     def __setup_new_node(self, node):
         """
-        Setup a node when it's created (either directly or as a result of loading a script).  This
-        allows us to dynamically populate the profile list.
+        Setup a node when it's created (either directly or as a result of loading a script).
+        This allows us to dynamically populate the profile list.
+
+        This method will re-process the node and reapply settings in case it has
+        been previously processed.
+
+        .. note:: There are edge cases in Nuke where a node has already been previously
+                  set up but for another context - this can happen as a consequence of
+                  bugs in the automatic context switching. It is therefore not safe to
+                  assume that setting up of these nodes only needs to happen once -
+                  it needs to happen whenever the toolkit write node configuration
+                  changes.
         
         :param node:    The Shotgun Write Node to set up
         """
@@ -1880,12 +1884,13 @@ class TankWriteNodeHandler(object):
         if not isinstance(node, nuke.Gizmo):
             return
         
-        if self.__is_node_fully_constructed(node):
-            # node has already been constructed for this session!
-            return
-        
         self._app.log_debug("Setting up new node...")
-        
+
+        # reset the construction flag to ensure that
+        # the node is toggled into its incomplete state
+        # this will disable certain callbacks from firing.
+        self.__set_final_construction_flag(node, False)
+
         # populate the profiles list as this isn't stored with the file and is
         # dynamic based on the user's configuration
         profile_names = list(self._profile_names)
@@ -1929,14 +1934,27 @@ class TankWriteNodeHandler(object):
             new_output_name = node.knob("name").value()
             self.__set_output(node, new_output_name)
         
-        # now that the node is constructed, we can process knob changes
-        # correctly.
-        node.knob("tk_is_fully_constructed").setValue(True)
-        node.knob("tk_is_fully_constructed").setEnabled(False)
-
         # set ocio info on the gizmo
         self.__setOCIOInfoOnGizmo(node)
 
+        # now that the node is constructed, we can process
+        # knob changes correctly.
+        self.__set_final_construction_flag(node, True)
+
+    def __set_final_construction_flag(self, node, status):
+        """
+        Controls the flag that indicates that a node has been
+        finalized.
+
+        :param node: nuke node object
+        :param status: boolean flag to indicating finalized state.
+        """
+        if status:
+            node.knob("tk_is_fully_constructed").setValue(True)
+            node.knob("tk_is_fully_constructed").setEnabled(False)
+        else:
+            node.knob("tk_is_fully_constructed").setEnabled(True)
+            node.knob("tk_is_fully_constructed").setValue(False)
 
     def __setOCIOInfoOnGizmo(self, node): # donat
         '''
@@ -1981,8 +1999,6 @@ class TankWriteNodeHandler(object):
             camCol = "Unspecified"
         self._app.log_debug("Camera colorspace from shotgun is %s" % camCol)
         return camCol
-
-
 
     def __is_node_fully_constructed(self, node):
         """

@@ -65,7 +65,7 @@ class TankWriteNodeHandler(object):
         self.populate_profiles_from_settings()
 
         # get the camera colorspace from Shotgun. donat
-        self.cameraColorspace = self.__getCameraColorspaceFromShotgun()
+        self.getCameraColorspaceFromShotgun()
             
     ################################################################################################
     # Properties
@@ -1977,28 +1977,32 @@ class TankWriteNodeHandler(object):
         ocioInfoB = "using luts for shot %s (seq %s). camera colorspace is %s" % (event, sequence, self.cameraColorspace)
         self.__update_knob_value(node, "OCIOINFOB", ocioInfoB)
 
-    def __getCameraColorspaceFromShotgun(self):
+    def getCameraColorspaceFromShotgun(self):
         '''
         Get the Camera Colorspace (should be called the grading colorspace) using
         a shotgun api call. This method is called once in the init of the class because accessing
         Shotgun's database is slow
         Donat
         '''
+        
+        camCol = None
 
-        entity = self._app.context.entity
+        entity = self._app.context.entity  #can be None if in project env
 
-        sg_entity_type = entity["type"]  # should be Shot
-        sg_filters = [["id", "is", entity["id"]]]  #  code of the current shot
-        sg_fields = ['sg_camera_colorspace']
+        if entity:
+            sg_entity_type = entity["type"]  # should be Shot or Asset
+            sg_filters = [["id", "is", entity["id"]]]  #  code of the current shot/asset
+            sg_fields = ['sg_camera_colorspace']
 
-        data = self._app.shotgun.find_one(sg_entity_type, filters=sg_filters, fields=sg_fields)
-        camCol = data['sg_camera_colorspace']
+            data = self._app.shotgun.find_one(sg_entity_type, filters=sg_filters, fields=sg_fields)
+            camCol = data['sg_camera_colorspace']
         
         
         if camCol == None:
             camCol = "Unspecified"
         self._app.log_debug("Camera colorspace from shotgun is %s" % camCol)
-        return camCol
+
+        self.cameraColorspace = camCol
 
     def __is_node_fully_constructed(self, node):
         """

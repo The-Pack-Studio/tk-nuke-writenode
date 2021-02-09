@@ -259,9 +259,12 @@ class TankWriteNodeHandler(object):
         self._app.log_debug("Looking for placeholder nodes to process...")
         
         node_found = False
+        nodes = []
         for n in nuke.allNodes("ModifyMetaData"):
-            if not n.name().startswith("ShotgunWriteNodePlaceholder"):
-                continue
+            if n.name().startswith("ShotgunWriteNodePlaceholder"):
+                nodes.append([n, n.dependencies()[0]])
+
+        for n, i in nodes:
 
             self._app.log_debug("Found ShotgunWriteNodePlaceholder node: %s" % n)
             metadata = n.metadata()
@@ -283,6 +286,7 @@ class TankWriteNodeHandler(object):
 
             # create the node:
             new_node = self.create_new_node(profile_name)
+            new_node.setInput(0, i)
 
             # set the output:
             self.__set_output(new_node, output_name)

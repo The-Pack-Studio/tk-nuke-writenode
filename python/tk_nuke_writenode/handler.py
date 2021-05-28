@@ -2149,7 +2149,12 @@ class TankWriteNodeHandler(object):
         '''
         Sets the relevant OCIO info on the properties panel of the shotgun writenode
         '''
-        event = self._app.context.entity['name']
+        event = ""
+        try:
+            event = self._app.context.entity['name']
+        except:
+            event = "Unknown shot"
+            
         sequence = ''
         try:
             sequence = self._app.context.as_template_fields(self._app.sgtk.templates['nuke_shot_work'])['Sequence']

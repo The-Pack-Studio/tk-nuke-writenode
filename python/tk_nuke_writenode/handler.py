@@ -1945,6 +1945,11 @@ class TankWriteNodeHandler(object):
         if not fields:
             raise TkComputePathError("The current script is not a SG Work File!")
 
+        profile_name = self.get_node_profile_name(node)
+        profile = self._profiles.get(profile_name)
+        file_type = profile["file_type"]
+        fields["extension"] = file_type
+
         # Force use of %d format for nuke renders:
         fields["SEQ"] = "FORMAT: %d"
 

@@ -636,6 +636,19 @@ class TankWriteNodeHandler(object):
             new_sg_wn.setXpos(node_pos[0])
             new_sg_wn.setYpos(node_pos[1])
 
+
+    def get_node_in_colorspace(self, node):
+        """
+        Return the in colorspace
+        """
+        return self.__get_node_colorspace(node, colorspace_type="in")
+
+    def get_node_out_colorspace(self, node):
+        """
+        Return the out colorspace
+        """
+        return self.__get_node_colorspace(node, colorspace_type="out")
+
     ################################################################################################
     # Public methods called from gizmo - although these are public, they should
     # be considered as private and not used directly!
@@ -1118,8 +1131,6 @@ class TankWriteNodeHandler(object):
         )
         file_type = profile["file_type"]
         file_settings = profile["settings"]
-        ocio_colorspace_in = profile["ocio_colorspace_in"]
-        ocio_colorspace_out = profile["ocio_colorspace_out"]
         tile_color = profile["tile_color"]
         promote_write_knobs = profile.get("promote_write_knobs", [])
 
@@ -1144,7 +1155,9 @@ class TankWriteNodeHandler(object):
             node, "tk_file_type_settings", sgtk.util.pickle.dumps(file_settings)
         )
 
-        # set ocio colorspace in and out knobs
+        # get and set ocio colorspace in and out knobs
+        ocio_colorspace_in = self.__resolve_actual_colorspace(profile["ocio_colorspace_in"])
+        ocio_colorspace_out = self.__resolve_actual_colorspace(profile["ocio_colorspace_out"])
         self.__populate_ocio_knobs(node, ocio_colorspace_in, ocio_colorspace_out)
 
         # Hide the promoted knobs that might exist from the previously
@@ -1419,59 +1432,6 @@ class TankWriteNodeHandler(object):
                 )
                 write_node.readKnobs("\n".join(filtered_settings))
                 self.reset_render_path(node)
-
-    def __populate_ocio_knobs(self, node, ocio_colorspace_in, ocio_colorspace_out):  # donat
-        '''
-        Controls the OCIO knobs of the gizmo
-        Sets the colorspace in and out and the context variables
-        '''
-        
-        event = self._app.context.entity['name']
-        sequence = ''
-        try:
-            sequence = self._app.context.as_template_fields(self._app.sgtk.templates['nuke_shot_work'])['Sequence']
-        except:
-            self._app.log_debug("No sequence name found in the template of nuke_shot_work")
-
-        if "camera" in ocio_colorspace_in:
-            ocio_colorspace_in = self.cameraColorspace
-        if "camera" in ocio_colorspace_out:
-            ocio_colorspace_out = self.cameraColorspace
-
-        if ocio_colorspace_in == 'Unspecified' or ocio_colorspace_out == 'Unspecified':
-            self._app.log_warning("The Camera colorspace field in Shotgun is empty, please set the value on the Shot Info page")
-            return
-                                   
-        # get the embedded ocio node:
-        ocio_node = node.node(TankWriteNodeHandler.OCIO_NODE_NAME)
-
-
-        # set the context variables of the OCIO node
-        
-        ocio_node.knob('key1').setValue('EVENT')
-        ocio_node.knob('value1').setValue(event)
-        ocio_node.knob('key2').setValue('CAMERA')
-        ocio_node.knob('value2').setValue(self.cameraColorspace)
-        ocio_node.knob('key3').setValue('SEQUENCE')
-        ocio_node.knob('value3').setValue(sequence)
-
-
-
-        # get the embedded ocio node:
-        ocio_node = node.node(TankWriteNodeHandler.OCIO_NODE_NAME)
-
-        # set the in colorspace
-        ocio_node.knob('in_colorspace').setValue(ocio_colorspace_in)
-        # and read it back to check that the value is what we expect
-        if ocio_node.knob('in_colorspace').value() != ocio_colorspace_in:
-            self._app.log_error("Shotgun write node configuration refers to an invalid input colorspace, '%s'."
-                                "Check the shot_step.yml and/or the OCIO config file used in Nuke" % ocio_colorspace_in)
-        # set the out colorspace
-        ocio_node.knob('out_colorspace').setValue(ocio_colorspace_out)
-        # and read it back to check that the value is what we expect
-        if ocio_node.knob('out_colorspace').value() != ocio_colorspace_out:
-            self._app.log_error("Shotgun write node configuration refers to an invalid output colorspace, '%s'."
-                                "Check the shot_step.yml and/or the OCIO config file used in Nuke" % ocio_colorspace_out)
 
     def __set_output(self, node, output_name):
         """
@@ -2151,59 +2111,6 @@ class TankWriteNodeHandler(object):
             node.knob("tk_is_fully_constructed").setEnabled(True)
             node.knob("tk_is_fully_constructed").setValue(False)
 
-    def __setOCIOInfoOnGizmo(self, node): # donat
-        '''
-        Sets the relevant OCIO info on the properties panel of the shotgun writenode
-        '''
-        event = ""
-        try:
-            event = self._app.context.entity['name']
-        except:
-            event = "Unknown shot"
-            
-        sequence = ''
-        try:
-            sequence = self._app.context.as_template_fields(self._app.sgtk.templates['nuke_shot_work'])['Sequence']
-        except:
-            self._app.log_debug("No sequence name found in the template of nuke_shot_work")
-
-        # get the embedded ocio node (donat)
-        ocio_node = node.node(TankWriteNodeHandler.OCIO_NODE_NAME)
-        cIn = ocio_node.knob('in_colorspace').value()
-        cOut = ocio_node.knob('out_colorspace').value()
-        # updating text knobs on the gizmo
-        ocioInfoA = "Converting from <b>%s</b> to <b>%s</b>," % (cIn, cOut)
-        self.__update_knob_value(node, "OCIOINFOA", ocioInfoA)
-        ocioInfoB = "using luts for shot %s (seq %s). camera colorspace is %s" % (event, sequence, self.cameraColorspace)
-        self.__update_knob_value(node, "OCIOINFOB", ocioInfoB)
-
-    def getCameraColorspaceFromShotgun(self):
-        '''
-        Get the Camera Colorspace (should be called the grading colorspace) using
-        a shotgun api call. This method is called once in the init of the class because accessing
-        Shotgun's database is slow
-        Donat
-        '''
-        
-        camCol = None
-
-        entity = self._app.context.entity  #can be None if in project env
-
-        if entity:
-            sg_entity_type = entity["type"]  # should be Shot or Asset
-            sg_filters = [["id", "is", entity["id"]]]  #  code of the current shot/asset
-            sg_fields = ['sg_camera_colorspace']
-
-            data = self._app.shotgun.find_one(sg_entity_type, filters=sg_filters, fields=sg_fields)
-            camCol = data['sg_camera_colorspace']
-        
-        
-        if camCol == None:
-            camCol = "Unspecified"
-        self._app.log_debug("Camera colorspace from shotgun is %s" % camCol)
-
-        self.cameraColorspace = camCol
-
     def __is_node_fully_constructed(self, node):
         """
         The tk_is_fully_constructed knob is set to True after the onCreate callback has completed.  This
@@ -2390,3 +2297,126 @@ class TankWriteNodeHandler(object):
         # populate the initial output name based on the render template:
         render_template = self.get_render_template(node)
         self.__populate_initial_output_name(render_template, node)
+
+
+    #### private methods Nozon specific
+
+    def getCameraColorspaceFromShotgun(self):
+        '''
+        Get the Camera Colorspace (should be called the grading colorspace) using
+        a shotgun api call. This method is called once in the init of the class because accessing
+        Shotgun's database is slow
+        Donat
+        '''
+        
+        camCol = None
+
+        entity = self._app.context.entity  #can be None if in project env
+
+        if entity:
+            sg_entity_type = entity["type"]  # should be Shot or Asset
+            sg_filters = [["id", "is", entity["id"]]]  #  code of the current shot/asset
+            sg_fields = ['sg_camera_colorspace']
+
+            data = self._app.shotgun.find_one(sg_entity_type, filters=sg_filters, fields=sg_fields)
+            camCol = data['sg_camera_colorspace']
+        
+        
+        if camCol == None:
+            camCol = "Unspecified"
+        self._app.log_debug("Camera colorspace from shotgun is %s" % camCol)
+
+        self.cameraColorspace = camCol
+
+    def __get_node_colorspace(self, node, colorspace_type=''):
+
+        settings = self.__get_node_profile_settings(node)
+        if not settings:
+            self._app.log_error("Could not find settings (donat)")
+            return None
+
+        if colorspace_type == "in":
+            ocio_colorspace_in = settings.get('ocio_colorspace_in')
+            return self.__resolve_actual_colorspace(ocio_colorspace_in)
+        if colorspace_type == "out":
+            ocio_colorspace_out = settings.get('ocio_colorspace_out')
+            return self.__resolve_actual_colorspace(ocio_colorspace_out)
+
+    def __resolve_actual_colorspace(self, colorspace):
+        '''
+        Returns actual name of a colorspace
+        In the yaml config file of this app, the colorspace can be set as 'camera',
+        which needs to be converted by fecthing the camera colorspace from SG's database
+        '''
+        if "camera" in colorspace:
+            colorspace = self.cameraColorspace
+
+        if colorspace == 'Unspecified' or colorspace == '':
+            self._app.log_warning("The Camera colorspace field in Shotgun is empty, please set the value on the Shot Info page")
+            return
+
+        return colorspace
+
+    def __populate_ocio_knobs(self, node, colorspace_in, colorspace_out):
+        '''
+        Controls the OCIO knobs of the gizmo
+        Sets the colorspace in and out and the context variables
+        '''
+        
+        event = self._app.context.entity['name']
+        sequence = ''
+        try:
+            sequence = self._app.context.as_template_fields(self._app.sgtk.templates['nuke_shot_work'])['Sequence']
+        except:
+            self._app.log_debug("No sequence name found in the template of nuke_shot_work")
+              
+        # get the embedded ocio node:
+        ocio_node = node.node(TankWriteNodeHandler.OCIO_NODE_NAME)
+
+        # set the context variables of the OCIO node
+        ocio_node.knob('key1').setValue('EVENT')
+        ocio_node.knob('value1').setValue(event)
+        ocio_node.knob('key2').setValue('CAMERA')
+        ocio_node.knob('value2').setValue(self.cameraColorspace)
+        ocio_node.knob('key3').setValue('SEQUENCE')
+        ocio_node.knob('value3').setValue(sequence)
+
+        # set the in colorspace
+        self.__update_knob_value(ocio_node, "in_colorspace", colorspace_in)
+        # and read it back to check that the value is what we expect
+        if ocio_node.knob('in_colorspace').value() != colorspace_in:
+            self._app.log_error("Shotgun write node configuration refers to an invalid input colorspace, '%s'."
+                                "Check the shot_step.yml and/or the OCIO config file used in Nuke" % colorspace_in)
+        # set the out colorspace
+        self.__update_knob_value(ocio_node, "out_colorspace", colorspace_out)
+        # and read it back to check that the value is what we expect
+        if ocio_node.knob('out_colorspace').value() != colorspace_out:
+            self._app.log_error("Shotgun write node configuration refers to an invalid output colorspace, '%s'."
+                                "Check the shot_step.yml and/or the OCIO config file used in Nuke" % colorspace_out)
+
+    def __setOCIOInfoOnGizmo(self, node):
+        '''
+        Sets the relevant OCIO info on the properties panel of the shotgun writenode
+        '''
+        event = ""
+        try:
+            event = self._app.context.entity['name']
+        except:
+            event = "Unknown shot"
+            
+        sequence = ''
+        try:
+            sequence = self._app.context.as_template_fields(self._app.sgtk.templates['nuke_shot_work'])['Sequence']
+        except:
+            self._app.log_debug("No sequence name found in the template of nuke_shot_work")
+
+        # get the embedded ocio node (donat)
+        ocio_node = node.node(TankWriteNodeHandler.OCIO_NODE_NAME)
+        cIn = ocio_node.knob('in_colorspace').value()
+        cOut = ocio_node.knob('out_colorspace').value()
+        # updating text knobs on the gizmo
+        ocioInfoA = "Converting from <b>%s</b> to <b>%s</b>," % (cIn, cOut)
+        self.__update_knob_value(node, "OCIOINFOA", ocioInfoA)
+        ocioInfoB = "using luts for shot %s (seq %s). camera colorspace is %s" % (event, sequence, self.cameraColorspace)
+        self.__update_knob_value(node, "OCIOINFOB", ocioInfoB)
+

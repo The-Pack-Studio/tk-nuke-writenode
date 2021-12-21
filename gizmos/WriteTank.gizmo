@@ -458,8 +458,8 @@ Gizmo {
   disable {{1-parent.ocio_unpremult}}
  }
  OCIOColorSpace {
-  in_colorspace linear
-  out_colorspace linear
+  in_colorspace scene_linear
+  out_colorspace scene_linear
   name OCIOColorSpace1
   xpos 195
   ypos -32

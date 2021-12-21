@@ -277,6 +277,18 @@ class NukeWriteNode(tank.platform.Application):
         """
         self.__write_node_handler.create_new_node(profile_name)
 
+    def get_node_in_colorspace(self, node):
+        """
+        Return the output colorspace for the specified node
+        """
+        return self.__write_node_handler.get_node_in_colorspace(node)
+
+    def get_node_out_colorspace(self, node):
+        """
+        Return the output colorspace for the specified node
+        """
+        return self.__write_node_handler.get_node_out_colorspace(node)
+
     # Private methods
     #
     def __add_write_node_commands(self, context=None):

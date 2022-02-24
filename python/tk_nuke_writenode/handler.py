@@ -1907,6 +1907,10 @@ class TankWriteNodeHandler(object):
 
         profile_name = self.get_node_profile_name(node)
         profile = self._profiles.get(profile_name)
+        if not profile:
+            nuke.message("Problem with SG writenode : %s. The profile of this node doesn't exist anymore in the app environment. Please reset the profile in the writenode!" % node.name())
+            raise TkComputePathError("The profile of the write node doesn't exist anymore the the list of profiles (donat)")
+
         file_type = profile["file_type"]
         fields["extension"] = file_type
 

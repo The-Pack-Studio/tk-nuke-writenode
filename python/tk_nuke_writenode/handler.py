@@ -879,8 +879,9 @@ class TankWriteNodeHandler(object):
 
     def on_compute_shotgrid_version(self):
         '''
-        returns version number of nuke script
+        returns version number of the render path
         '''
+        
         # the ShotgunWrite node is the current node's parent:
         node = nuke.thisParent()
         if not node:
@@ -890,14 +891,20 @@ class TankWriteNodeHandler(object):
         if not self.__is_node_fully_constructed(node):
             return
 
-        version = ""
+        # return the render path but don't reset it:
+        path = self.__update_render_path(node, is_proxy=False)
 
-        curr_filename = self.__get_current_script_path()
-        fields = self._script_template.get_fields(curr_filename)
-        if not fields:
-            raise TkComputePathError("The current script is not a SG Work File!")
+        write_tmpl = self._app.sgtk.template_from_path(path)
+
+        if not write_tmpl:
+            raise TkComputePathError("No template can be found from the render path %s" % path)
+
+        fields = write_tmpl.get_fields(path)
 
         version = fields.get("version")
+        if not version:
+            self.log_debug("Could not find the 'version' field in the fields from template %s" % write_tmpl)
+            version = ""
 
         return str(version)
 

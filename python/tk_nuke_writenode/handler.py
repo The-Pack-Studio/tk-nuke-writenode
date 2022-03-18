@@ -876,6 +876,32 @@ class TankWriteNodeHandler(object):
                 )
                 raise
 
+
+    def on_compute_shotgrid_version(self):
+        '''
+        returns version number of nuke script
+        '''
+        # the ShotgunWrite node is the current node's parent:
+        node = nuke.thisParent()
+        if not node:
+            return
+
+        # don't do anything until the node is fully constructed!
+        if not self.__is_node_fully_constructed(node):
+            return
+
+        version = ""
+
+        curr_filename = self.__get_current_script_path()
+        fields = self._script_template.get_fields(curr_filename)
+        if not fields:
+            raise TkComputePathError("The current script is not a SG Work File!")
+
+        version = fields.get("version")
+
+        return str(version)
+
+
     ################################################################################################
     # Private methods
 
@@ -1849,8 +1875,6 @@ class TankWriteNodeHandler(object):
                 colorspace_name = ocio_node.knob('out_colorspace').value()
 
         return (render_template, width, height, output_name, colorspace_name)
-
-        return (render_template, width, height, output_name)
 
     def __compute_render_path(self, node, is_proxy=False):
         """

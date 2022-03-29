@@ -891,20 +891,21 @@ class TankWriteNodeHandler(object):
         if not self.__is_node_fully_constructed(node):
             return
 
-        # return the render path but don't reset it:
-        path = self.__update_render_path(node, is_proxy=False)
 
-        write_tmpl = self._app.sgtk.template_from_path(path)
+        nukescript = self.__get_current_script_path()
 
-        if not write_tmpl:
-            raise TkComputePathError("No template can be found from the render path %s" % path)
+        script_tmpl = self._app.sgtk.template_from_path(nukescript)
 
-        fields = write_tmpl.get_fields(path)
+        if not script_tmpl:
+            raise TkComputePathError("No template can be found from the nuke script path %s" % nukescript)
+
+        fields = script_tmpl.get_fields(nukescript)
 
         version = fields.get("version")
         if not version:
             self.log_debug("Could not find the 'version' field in the fields from template %s" % write_tmpl)
             version = ""
+
 
         return str(version)
 

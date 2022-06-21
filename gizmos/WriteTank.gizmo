@@ -474,7 +474,7 @@ Gizmo {
  ModifyMetaData {
   name ModifyMetaData1
   metadata {
-   {set shotgrid/version "\[python __import__('nuke')._shotgun_write_node_handler.on_compute_shotgrid_version()]"}
+   {set exr/nuke/shotgrid/version "\[python __import__('nuke')._shotgun_write_node_handler.on_compute_shotgrid_version()]"}
   }
  }
  Write {

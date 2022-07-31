@@ -199,22 +199,20 @@ Gizmo {
  }
 
  addUserKnob {
-    26 OCIOINFOA
+    26 OCIOINFO
     l "OCIO :"
+    T
     t "This shows the in and out colorspaces being used in the OCIO node embedded in the shotgun writenode."
- }
-
- addUserKnob {
-    26 OCIOINFOB
-    l ""
     +STARTLINE
  }
+
+
 
  addUserKnob {
     6 ocio_unpremult
     l premultiplied
     t "If there is an alpha channel, divide color data by the alpha before converting to the colorspace, and then multiply by the alpha afterwards. This will reproduce how partially transparent pixels are written by some renderers."
-    -STARTLINE
+    +STARTLINE
  }
  addUserKnob {
     6 ocio_disable
@@ -222,6 +220,19 @@ Gizmo {
     t "Kill switch for the internal OCIO node!\nUsed to override the colorspace conversion.\n\nIn other words if you check this box you will disable any color conversion inside the Write node, but the 'out' colorspace name will be used in the filename of the rendered images."
     -STARTLINE
  }
+ addUserKnob {
+    26 ""
+    l ""
+    +STARTLINE
+ }
+
+ addUserKnob {
+    26 TIMECODEINFO
+    l "TC :"
+    t "Timecode being set for the specified starting frame, taken from the Shot timecode fields in ShotGrid."
+    +STARTLINE
+ }
+
  addUserKnob {
     26 ""
     l ""
@@ -477,6 +488,14 @@ Gizmo {
    {set exr/nuke/shotgrid/version "\[python __import__('nuke')._shotgun_write_node_handler.on_compute_shotgrid_version()]"}
   }
  }
+ AddTimeCode {
+  name ShotGridAddTimeCode
+  startcode 00:00:00:00
+  fps {{root.fps}}
+  metafps false
+  frame 1
+  useFrame true
+ }
  Write {
   file "\[python __import__('nuke')._shotgun_write_node_handler.on_compute_path_gizmo_callback() if hasattr(__import__('nuke'), '_shotgun_write_node_handler') else nuke.thisParent().knob('cached_path').value()]"
   proxy "\[python __import__('nuke')._shotgun_write_node_handler.on_compute_proxy_path_gizmo_callback() if hasattr(__import__('nuke'), '_shotgun_write_node_handler') else nuke.thisParent().knob('tk_cached_proxy_path').value()]"
@@ -485,7 +504,7 @@ Gizmo {
   afterRender "import nuke\nif hasattr(nuke, \"_shotgun_write_node_handler\"):\n    nuke._shotgun_write_node_handler.on_after_render_gizmo_callback()"
   name Write1
   xpos 195
-  ypos 56
+  ypos 99
  }
 set N1aa72fa0 [stack 0]
  Reformat {

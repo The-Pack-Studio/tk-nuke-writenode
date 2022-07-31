@@ -38,6 +38,7 @@ class TankWriteNodeHandler(object):
     SG_WRITE_DEFAULT_NAME = "ShotGridWrite"
     WRITE_NODE_NAME = "Write1"
     OCIO_NODE_NAME = "OCIOColorSpace1"
+    ADD_TC_NODE_NAME = "ShotGridAddTimeCode"
 
     OUTPUT_KNOB_NAME = "tank_channel"
     USE_NAME_AS_OUTPUT_KNOB_NAME = "tk_use_name_as_channel"
@@ -66,8 +67,8 @@ class TankWriteNodeHandler(object):
 
         self.populate_profiles_from_settings()
 
-        # get the camera colorspace from Shotgun. donat
-        self.getCameraColorspaceFromShotgun()
+        # get infos from ShotGrid: camera colorspace and timecode infos. donat
+        self.get_nozon_info_shotgrid()
             
     ################################################################################################
     # Properties
@@ -1015,7 +1016,7 @@ class TankWriteNodeHandler(object):
         """
 
         self.__setOCIOInfoOnGizmo(node)
-
+        self.__setTimecodeInfoOnGizmo(node)
 
         # first set up the node label
         # this will be displayed on the node in the graph
@@ -1193,6 +1194,9 @@ class TankWriteNodeHandler(object):
         ocio_colorspace_in = self.__resolve_actual_colorspace(profile["ocio_colorspace_in"])
         ocio_colorspace_out = self.__resolve_actual_colorspace(profile["ocio_colorspace_out"])
         self.__populate_ocio_knobs(node, ocio_colorspace_in, ocio_colorspace_out)
+
+        #set the embedded addtimecode node
+        self.__populate_timecode_knobs(node, self.start_frame_number, self.start_frame_tc)
 
         # Hide the promoted knobs that might exist from the previously
         # active profile.
@@ -2337,32 +2341,67 @@ class TankWriteNodeHandler(object):
 
     #### private methods Nozon specific
 
-    def getCameraColorspaceFromShotgun(self):
+
+    def get_nozon_info_shotgrid(self):
         '''
-        Get the Camera Colorspace (should be called the grading colorspace) using
-        a shotgun api call. This method is called once in the init of the class because accessing
-        Shotgun's database is slow
+        Get the Camera Colorspace (should be called the grading colorspace), the source start frame and
+        source start timecode using a shotgun api call.
+        This method is called once in the init of the class because accessing Shotgun's database is slow
+        To refresh this information a 'reload and restart' is required
         Donat
         '''
         
-        camCol = None
+        camera_colorspace = None
+        start_frame_number = None
+        start_frame_tc = None
 
         entity = self._app.context.entity  #can be None if in project env
 
         if entity:
             sg_entity_type = entity["type"]  # should be Shot or Asset
             sg_filters = [["id", "is", entity["id"]]]  #  code of the current shot/asset
-            sg_fields = ['sg_camera_colorspace']
+            sg_fields = ['sg_camera_colorspace', 'sg_source_start_frame', 'sg_source_start_timecode']
 
             data = self._app.shotgun.find_one(sg_entity_type, filters=sg_filters, fields=sg_fields)
-            camCol = data['sg_camera_colorspace']
-        
-        
-        if camCol == None:
-            camCol = "Unspecified"
-        self._app.log_debug("Camera colorspace from shotgun is %s" % camCol)
+            camera_colorspace = data['sg_camera_colorspace']
+            start_frame_number = data['sg_source_start_frame']
+            start_frame_tc = data['sg_source_start_timecode']
 
-        self.cameraColorspace = camCol
+
+        # Camera colorspace field
+        if camera_colorspace == None:
+            camera_colorspace = "Unspecified"
+        self._app.log_debug("Camera colorspace from shotgun is %s" % camera_colorspace)
+
+
+        # Start frame field
+        if start_frame_number != None: # field isn't empty
+            start_frame_number = int(start_frame_number)
+
+        # Timecode field
+        if start_frame_tc != None: # field isn't empty
+            # need to check here that the tc is correctly formatted. Currently not taking fractional framerates into account
+            root_framerate = int(nuke.root()["fps"].value())
+            tc_pattern = re.compile(r"^(\d{1,2}):(\d{1,2}):(\d{1,2}):(\d{1,2})$")
+            check_tc = re.match(tc_pattern, start_frame_tc)
+            if not check_tc:
+                start_frame_tc = None
+            else:
+                hours = int(check_tc.group(1))
+                minutes = int(check_tc.group(2))
+                seconds = int(check_tc.group(3))
+                frames = int(check_tc.group(4))
+
+                if hours > 23 or minutes > 59 or seconds > 59 or frames > (root_framerate-1):
+                    self._app.log_debug("Timecode field is not correctly formatted: %s. Check the timecode field on SG" % start_frame_tc)
+                    start_frame_tc = None
+
+
+        self.cameraColorspace = camera_colorspace
+        self.start_frame_number = start_frame_number
+        self.start_frame_tc = start_frame_tc
+
+
 
     def __get_node_colorspace(self, node, colorspace_type=''):
 
@@ -2392,6 +2431,7 @@ class TankWriteNodeHandler(object):
             return
 
         return colorspace
+
 
     def __populate_ocio_knobs(self, node, colorspace_in, colorspace_out):
         '''
@@ -2430,6 +2470,41 @@ class TankWriteNodeHandler(object):
             self._app.log_error("Shotgun write node configuration refers to an invalid output colorspace, '%s'."
                                 "Check the shot_step.yml and/or the OCIO config file used in Nuke" % colorspace_out)
 
+
+    def __populate_timecode_knobs(self, node, start_frame_number, start_frame_tc):
+        '''
+        Controls the AddTimeode node of the gizmo
+        Sets the timecode startcode and start frame
+        (framerate is assumed to be the frame rate of the nuke comp)
+        '''
+              
+        # get the embedded addtimecode node:
+        tc_node = node.node(TankWriteNodeHandler.ADD_TC_NODE_NAME)
+
+        # First check the start_frame_number and start_frame_tc are valid (not None)
+        # If one of those is not valid, simply disable the node altogether
+        if start_frame_number == None or start_frame_tc == None:
+            self.__update_knob_value(tc_node, "disable", 1)
+            return
+ 
+        # if the values are correct, enable or re-enable the tc node
+        if start_frame_number != None and start_frame_tc != None:
+            self.__update_knob_value(tc_node, "disable", 0)
+
+        # set the start_frame_number
+        self.__update_knob_value(tc_node, "frame", start_frame_number)
+        # and read it back to check that the value is what we expect
+        if tc_node.knob('frame').value() != start_frame_number:
+            self._app.log_error("Shotgun write node error: AddTimeCode node start frame not correctly set, it should be: %s" % start_frame_number)
+
+        # set the start_frame_tc
+        self.__update_knob_value(tc_node, "startcode", start_frame_tc)
+        # and read it back to check that the value is what we expect
+        if tc_node.knob('startcode').value() != start_frame_tc:
+            self._app.log_error("Shotgun write node error: AddTimeCode node timecode not correctly set, it should be: %s" % start_frame_tc)
+
+
+
     def __setOCIOInfoOnGizmo(self, node):
         '''
         Sets the relevant OCIO info on the properties panel of the shotgun writenode
@@ -2451,8 +2526,28 @@ class TankWriteNodeHandler(object):
         cIn = ocio_node.knob('in_colorspace').value()
         cOut = ocio_node.knob('out_colorspace').value()
         # updating text knobs on the gizmo
-        ocioInfoA = "Converting from <b>%s</b> to <b>%s</b>," % (cIn, cOut)
-        self.__update_knob_value(node, "OCIOINFOA", ocioInfoA)
-        ocioInfoB = "using luts for shot %s (seq %s). camera colorspace is %s" % (event, sequence, self.cameraColorspace)
-        self.__update_knob_value(node, "OCIOINFOB", ocioInfoB)
+        ocioInfo = "Converting from <b>%s</b> to <b>%s</b>,\nusing luts for shot %s (seq %s). Cam colorspace is %s" % (cIn, cOut, event, sequence, self.cameraColorspace)
+        self.__update_knob_value(node, "OCIOINFO", ocioInfo)
+
+
+    def __setTimecodeInfoOnGizmo(self, node):
+
+
+        # get the embedded AddTimeCode node 
+        tc_node = node.node(TankWriteNodeHandler.ADD_TC_NODE_NAME)
+
+
+        startcode = tc_node.knob('startcode').value()
+        frame = tc_node.knob('frame').value()
+        frame = int(frame)
+        fps = tc_node.knob('fps').value()
+
+        disabled = tc_node.knob("disable").value()
+        if disabled:
+            tc_info = "<i style='color:orange'><b>Disabled : No valid timecode or frame start defined in SG</b></i>"
+        else:
+            tc_info = "Frame %s = TC %s (fps=%s)" % (frame, startcode, fps)
+        
+        self.__update_knob_value(node, "TIMECODEINFO", tc_info)
+
 

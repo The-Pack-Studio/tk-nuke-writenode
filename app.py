@@ -73,7 +73,7 @@ class NukeWriteNode(tank.platform.Application):
         self.__write_node_handler.populate_profiles_from_settings()
         self.__write_node_handler.populate_script_template()
         self.__add_write_node_commands(new_context)
-        self.__write_node_handler.getCameraColorspaceFromShotgun()  # donat: on context change fetch the cam colorspace from SG
+        self.__write_node_handler.get_nozon_info_shotgrid()  # donat: on context change fetch the colorspace and TC infos from SG
 
         # now the writenode handler settings have been updated we can update the paths of all existing SG writenodes
         for node in self.get_write_nodes():

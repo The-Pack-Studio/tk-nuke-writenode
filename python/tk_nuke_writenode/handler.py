@@ -246,7 +246,7 @@ class TankWriteNodeHandler(object):
         #     return
 
         # new node please!
-        node = nuke.createNode(TankWriteNodeHandler.SG_WRITE_NODE_CLASS)
+        node = nuke.createNode(TankWriteNodeHandler.SG_WRITE_NODE_CLASS, inpanel = False)
 
         # rename to our new default name:
         existing_node_names = [n.name() for n in nuke.allNodes()]
@@ -898,6 +898,8 @@ class TankWriteNodeHandler(object):
 
 
         nukescript = self.__get_current_script_path()
+        if not nukescript:
+            return
 
         script_tmpl = self._app.sgtk.template_from_path(nukescript)
 
@@ -2443,7 +2445,11 @@ class TankWriteNodeHandler(object):
         Sets the colorspace in and out and the context variables
         '''
         
-        event = self._app.context.entity['name']
+        event = ""
+        entity = self._app.context.entity
+        if entity:
+            event = entity['name']
+
         sequence = ''
         try:
             sequence = self._app.context.as_template_fields(self._app.sgtk.templates['nuke_shot_work'])['Sequence']
@@ -2548,7 +2554,7 @@ class TankWriteNodeHandler(object):
 
         disabled = tc_node.knob("disable").value()
         if disabled:
-            tc_info = "<i style='color:orange'><b>Disabled : No valid timecode or frame start defined in SG</b></i>"
+            tc_info = "Disabled : No valid timecode or frame start defined in SG"
         else:
             tc_info = "Frame %s = TC %s (fps=%s)" % (frame, startcode, fps)
         

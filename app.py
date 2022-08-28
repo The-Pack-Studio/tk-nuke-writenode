@@ -275,7 +275,8 @@ class NukeWriteNode(tank.platform.Application):
         """
         Creates a Shotgun write node using the provided profile_name.
         """
-        self.__write_node_handler.create_new_node(profile_name)
+        node = self.__write_node_handler.create_new_node(profile_name)
+        return node
 
     def get_node_in_colorspace(self, node):
         """

@@ -228,18 +228,22 @@ class TankWriteNodeHandler(object):
 
         :returns: a node object.
         """
-        curr_filename = self.__get_current_script_path()
-        if not curr_filename:
-            nuke.message("Please save the file first!")
-            return
 
-        # make sure that the file is a proper tank work path
-        if not self._script_template.validate(curr_filename):
-            nuke.message(
-                "This file is not a SG work file. Please use SG Save-As in order "
-                "to save the file as a valid work file."
-            )
-            return
+        # Donat : disabled checking if the script is already saved
+        # If the script is not saved yet the writenode will not be fully
+        # initialised, but as soon as it is saved it will be functional
+        # curr_filename = self.__get_current_script_path()
+        # if not curr_filename:
+        #     nuke.message("Please save the file first!")
+        #     return
+
+        # # make sure that the file is a proper tank work path
+        # if not self._script_template.validate(curr_filename):
+        #     nuke.message(
+        #         "This file is not a SG work file. Please use SG Save-As in order "
+        #         "to save the file as a valid work file."
+        #     )
+        #     return
 
         # new node please!
         node = nuke.createNode(TankWriteNodeHandler.SG_WRITE_NODE_CLASS)

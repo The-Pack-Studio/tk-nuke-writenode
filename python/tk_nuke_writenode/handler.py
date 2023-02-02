@@ -2369,9 +2369,10 @@ class TankWriteNodeHandler(object):
             sg_fields = ['sg_camera_colorspace', 'sg_source_start_frame', 'sg_source_start_timecode']
 
             data = self._app.shotgun.find_one(sg_entity_type, filters=sg_filters, fields=sg_fields)
-            camera_colorspace = data['sg_camera_colorspace']
-            start_frame_number = data['sg_source_start_frame']
-            start_frame_tc = data['sg_source_start_timecode']
+            if data:
+                camera_colorspace = data.get('sg_camera_colorspace')
+                start_frame_number = data.get('sg_source_start_frame')
+                start_frame_tc = data.get('sg_source_start_timecode')
 
 
         # Camera colorspace field

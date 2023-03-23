@@ -2360,20 +2360,21 @@ class TankWriteNodeHandler(object):
         camera_colorspace = None
         start_frame_number = None
         start_frame_tc = None
+        shot_lut = None
 
         entity = self._app.context.entity  #can be None if in project env
 
         if entity:
             sg_entity_type = entity["type"]  # should be Shot or Asset
             sg_filters = [["id", "is", entity["id"]]]  #  code of the current shot/asset
-            sg_fields = ['sg_camera_colorspace', 'sg_source_start_frame', 'sg_source_start_timecode']
+            sg_fields = ['sg_camera_colorspace', 'sg_source_start_frame', 'sg_source_start_timecode', 'sg_shot_lut']
 
             data = self._app.shotgun.find_one(sg_entity_type, filters=sg_filters, fields=sg_fields)
             if data:
                 camera_colorspace = data.get('sg_camera_colorspace')
                 start_frame_number = data.get('sg_source_start_frame')
                 start_frame_tc = data.get('sg_source_start_timecode')
-
+                shot_lut = data.get('sg_shot_lut')
 
         # Camera colorspace field
         if camera_colorspace == None:
@@ -2407,6 +2408,7 @@ class TankWriteNodeHandler(object):
         self.cameraColorspace = camera_colorspace
         self.start_frame_number = start_frame_number
         self.start_frame_tc = start_frame_tc
+        self.shot_lut = (shot_lut or '')
 
 
 
@@ -2456,7 +2458,9 @@ class TankWriteNodeHandler(object):
             sequence = self._app.context.as_template_fields(self._app.sgtk.templates['nuke_shot_work'])['Sequence']
         except:
             self._app.log_debug("No sequence name found in the template of nuke_shot_work")
-              
+
+
+
         # get the embedded ocio node:
         ocio_node = node.node(TankWriteNodeHandler.OCIO_NODE_NAME)
 
@@ -2467,6 +2471,8 @@ class TankWriteNodeHandler(object):
         ocio_node.knob('value2').setValue(self.cameraColorspace)
         ocio_node.knob('key3').setValue('SEQUENCE')
         ocio_node.knob('value3').setValue(sequence)
+        ocio_node.knob('key4').setValue('SHOTLUT')
+        ocio_node.knob('value4').setValue(self.shot_lut)
 
         # set the in colorspace
         self.__update_knob_value(ocio_node, "in_colorspace", colorspace_in)

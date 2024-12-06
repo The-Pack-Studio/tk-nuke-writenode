@@ -75,7 +75,7 @@ class NukeWriteNode(tank.platform.Application):
         self.__add_write_node_commands(new_context)
         self.__write_node_handler.get_nozon_info_shotgrid()  # donat: on context change fetch the colorspace and TC infos from SG
 
-        # now the writenode handler settings have been updated we can update the paths of all existing SG writenodes
+        # now the writenode handler settings have been updated we can update the paths of all existing PTR writenodes
         for node in self.get_write_nodes():
             # Although there are nuke callbacks to handle setting up the new node; on automatic context change
             # these are triggered before the engine changes context, so we must manually call it here.
@@ -226,8 +226,9 @@ class NukeWriteNode(tank.platform.Application):
 
             res = QtGui.QMessageBox.question(
                 None,
-                "Convert All SG Write Nodes?",
-                "This will convert all ShotGrid write nodes to standard write nodes."
+                "Convert All PTR Write Nodes?",
+                "This will convert all Flow Production Tracking write nodes to standard "
+                "write nodes."
                 "\nOK to proceed?",
                 QtGui.QMessageBox.Yes | QtGui.QMessageBox.No,
             )
@@ -242,7 +243,7 @@ class NukeWriteNode(tank.platform.Application):
     def convert_from_write_nodes(self, show_warning=False):
         """
         Convert all regular Nuke Write nodes that have previously been converted
-        from Shotgun Write nodes, back into Shotgun Write nodes.
+        from Flow Production Tracking Write nodes, back into Flow Production Tracking Write nodes.
 
         :param show_warning: Optional bool that sets whether a warning box should be displayed to the user;
          defaults to False.
@@ -258,7 +259,8 @@ class NukeWriteNode(tank.platform.Application):
             res = QtGui.QMessageBox.question(
                 None,
                 "Convert All Write Nodes?",
-                "This will convert any ShotGrid Write Nodes that have been converted "
+                "This will convert any Flow Production Tracking Write Nodes that have "
+                "been converted "
                 "into standard write nodes back to their original form."
                 "\nOK to proceed?",
                 QtGui.QMessageBox.Yes | QtGui.QMessageBox.No,
@@ -307,9 +309,13 @@ class NukeWriteNode(tank.platform.Application):
                 pn
             )
             self.engine.register_command(
-                "%s [Shotgun]" % profile_name,
+                profile_name,
                 cb_fn,
-                dict(type="node", icon=write_node_icon, context=context,),
+                dict(
+                    type="node",
+                    icon=write_node_icon,
+                    context=context,
+                ),
             )
 
         # Show the convert actions in the Menu if configured to do so
@@ -317,7 +323,7 @@ class NukeWriteNode(tank.platform.Application):
 
             # We only want to show the convert methods if there are no promoted knobs,
             # as these aren't supported when converting back
-            # todo: We should check the settings and then scan the scene to see if any SG write nodes use promoted knobs
+            # todo: We should check the settings and then scan the scene to see if any PTR write nodes use promoted knobs
             write_nodes = self.get_setting("write_nodes")
             promoted_knob_write_nodes = next(
                 (a_node for a_node in write_nodes if a_node["promote_write_knobs"]),
@@ -335,7 +341,7 @@ class NukeWriteNode(tank.platform.Application):
                 )
 
                 self.engine.register_command(
-                    "Convert SG Write Nodes to Write Nodes...",
+                    "Convert PTR Write Nodes to Write Nodes...",
                     convert_to_write_nodes_action,
                     {
                         "type": "context_menu",
@@ -343,7 +349,7 @@ class NukeWriteNode(tank.platform.Application):
                     },
                 )
                 self.engine.register_command(
-                    "Convert Write Nodes back to SG format...",
+                    "Convert Write Nodes back to PTR format...",
                     convert_from_write_nodes_action,
                     {
                         "type": "context_menu",

@@ -42,6 +42,19 @@ class TankWriteNodeHandler(object):
     OUTPUT_KNOB_NAME = "tank_channel"
     USE_NAME_AS_OUTPUT_KNOB_NAME = "tk_use_name_as_channel"
 
+    DEFAULT_OUTPUT_NAME = "output"
+
+    CAMERA_KNOB_NAME = "camera_pulldown"
+    LENS_KNOB_NAME = "lens_pulldown"
+    QUERY_SHOTGRID_KNOB_NAME = "query_shotgrid"
+
+    HIERO_PLATE_PUBLISH_TYPE = {'id': 59, 'name': 'Hiero Plate', 'type': 'PublishedFileType'}
+
+    PLATE_PULLDOWN_KNOB_NAME = "plate_pulldown"
+
+    HIERO_PLATE_TEMPLATE_KEY = "output" # token name in the templates.yml that define the plate type
+
+
     ################################################################################################
     # Construction
 
@@ -65,6 +78,15 @@ class TankWriteNodeHandler(object):
         self.__is_updating_proxy_path = False
 
         self.populate_profiles_from_settings()
+
+
+        if sys.platform == "win32":
+            self.local_path = "local_path_windows"
+        elif sys.platform == "linux" or sys.platform == "linux2":
+            self.local_path = "local_path_linux"
+        elif sys.platform == "darwin":
+            self.local_path = "local_path_mac"
+
 
         # get infos from ShotGrid: camera colorspace and timecode infos. donat
         self.get_nozon_info_shotgrid()
@@ -307,6 +329,10 @@ class TankWriteNodeHandler(object):
 
             # set the output:
             self.__set_output(new_node, output_name)
+
+
+            # should add self.__set_camera and self.__set_lens.....
+
 
             # And remove the original metadata
             nuke.delete(n)
@@ -877,6 +903,22 @@ class TankWriteNodeHandler(object):
                 )
                 raise
 
+    # Nozon
+    def on_refresh_shotgrid_infos_gizmo_callback(self):
+        """
+        Callback from the gizmo whenever the 'Refresh info from ShotGrid' button is pressed.
+        """
+        node = nuke.thisNode()
+        if not node:
+            return
+
+        # Query shotgrid
+        self.get_nozon_info_shotgrid()
+
+        # Reset the list of cameras, lenses and plates
+        self.__set_camera_lens_plate_knobs(node)
+
+
 
     def on_compute_shotgrid_version(self):
         '''
@@ -1324,7 +1366,7 @@ class TankWriteNodeHandler(object):
 
         if output_default is None:
             # no default name - use hard coded built in
-            output_default = "output"
+            output_default = TankWriteNodeHandler.DEFAULT_OUTPUT_NAME
 
         # get the output names for all other nodes that are using the same profile
         used_output_names = set()
@@ -1341,11 +1383,17 @@ class TankWriteNodeHandler(object):
             output_default = ""
 
         # now ensure output name is unique:
-        postfix = 1
+        # postfix = 1 
         output_name = output_default
-        while output_name in used_output_names:
-            output_name = "%s%d" % (output_default, postfix)
-            postfix += 1
+        '''
+        DONAT: disabling adding a postfix number after the output name
+        The issue we have is compers creating a new write node
+        The new one will use 'output1' instead of 'output'. Down the line in Resolve/Nukestudio, the
+        person loading the sequences will not except this new name
+        '''
+        # while output_name in used_output_names:
+        #     output_name = "%s%d" % (output_default, postfix)
+        #     postfix += 1
 
         # finally, set the output name on the knob:
         node.knob(TankWriteNodeHandler.OUTPUT_KNOB_NAME).setValue(output_name)
@@ -1575,6 +1623,9 @@ class TankWriteNodeHandler(object):
                     height,
                     output_name,
                     colorspace_name,
+                    camera_name,
+                    lens_name,
+                    plate_name,
                 ) = self.__gather_render_settings(node, is_proxy)
 
                 # experimental settings cache to avoid re-computing the path if nothing has changed...
@@ -1588,6 +1639,9 @@ class TankWriteNodeHandler(object):
                     "height":height,
                     "output":output_name,
                     "colorspace":colorspace_name,
+                    "camera_name": camera_name,
+                    "lens_name": lens_name,
+                    "plate_name": plate_name,
                     "script_path":script_path,
                 }
 
@@ -1603,7 +1657,9 @@ class TankWriteNodeHandler(object):
                 else:
                     # compute the render path:
                     render_path = self.__compute_render_path_from(
-                        node, render_template, width, height, output_name, colorspace_name
+                        node, render_template, width, height,
+                        output_name, colorspace_name, camera_name,
+                        lens_name, plate_name
                     )
 
             except TkComputePathError as e:
@@ -1746,6 +1802,9 @@ class TankWriteNodeHandler(object):
                 # update output knobs:
                 self.__update_output_knobs(node)
 
+                # update camera and lens knobs visibility
+                self.__update_nozon_custom_knobs_visibility(node)
+
                 # finally, update preview:
                 self.__update_path_preview(node, is_proxy)
 
@@ -1868,6 +1927,10 @@ class TankWriteNodeHandler(object):
         width = height = 0
         output_name = ""
         colorspace_name = ''
+        camera_name = ""
+        lens_name = ""
+        plate_name = ""
+
         if is_proxy:
             if not render_template:
                 # we don't have a proxy template so fall back to render template.
@@ -1893,7 +1956,24 @@ class TankWriteNodeHandler(object):
                 ocio_node = node.node(TankWriteNodeHandler.OCIO_NODE_NAME)
                 colorspace_name = ocio_node.knob('out_colorspace').value()
 
-        return (render_template, width, height, output_name, colorspace_name)
+            if "Camera" in render_template.keys:
+                camera_name = self.get_node_camera_name(node)
+                if "Unknown" in camera_name:
+                    camera_name = ""
+
+            if "Lens" in render_template.keys:
+                lens_name = self.get_node_lens_name(node)
+                if "Unknown" in lens_name:
+                    lens_name = ""
+
+            if "plate" in render_template.keys:
+                plate_name = self.get_node_plate_name(node)
+                if "Unknown" in plate_name:
+                    plate_name = ""
+
+
+        return (render_template, width, height, output_name,
+                 colorspace_name, camera_name, lens_name, plate_name)
 
     def __compute_render_path(self, node, is_proxy=False):
         """
@@ -1905,16 +1985,18 @@ class TankWriteNodeHandler(object):
         """
 
         # gather the render settings to use:
-        render_template, width, height, output_name, colorspace_name = self.__gather_render_settings(
+        (render_template, width, height, output_name,
+             colorspace_name, camera_name, lens_name, plate_name) = self.__gather_render_settings(
             node, is_proxy)
 
         # compute the render path:
         return self.__compute_render_path_from(
-            node, render_template, width, height, output_name, colorspace_name
-        )
+            node, render_template, width, height, output_name,
+            colorspace_name, camera_name, lens_name, plate_name)
 
     def __compute_render_path_from(
-        self, node, render_template, width, height, output_name, colorspace_name
+        self, node, render_template, width, height,
+        output_name, colorspace_name, camera_name, lens_name, plate_name
     ):
         """
         Computes the render path for a node using the specified settings
@@ -1996,6 +2078,31 @@ class TankWriteNodeHandler(object):
         # add colorspace:
         if "colorspace" in render_template.keys:
             fields["colorspace"] = colorspace_name
+
+        if "Camera" in render_template.keys:
+            if not camera_name:
+                if not render_template.is_optional("Camera"):
+                    raise TkComputePathError(
+                        "A valid camera name is required by this profile for the 'Camera' field!")
+            else:
+                fields["Camera"] = camera_name
+
+        if "Lens" in render_template.keys:
+            if not lens_name:
+                if not render_template.is_optional("Lens"):
+                    raise TkComputePathError(
+                        "A valid lens name is required by this profile for the 'Lens' field!")
+            else:
+                fields["Lens"] = lens_name
+
+        if "plate" in render_template.keys:
+            if not plate_name:
+                if not render_template.is_optional("plate"):
+                    raise TkComputePathError(
+                        "A valid plate name is required by this profile for the 'plate' field!")
+            else:
+                fields["plate"] = plate_name
+
 
         # update with additional fields from the context:
         fields.update(self._app.context.as_template_fields(render_template))
@@ -2139,6 +2246,9 @@ class TankWriteNodeHandler(object):
         # set ocio info on the gizmo
         self.__setOCIOInfoOnGizmo(node)
 
+        # nozon
+        self.__set_camera_lens_plate_knobs(node)
+
         # now that the node is constructed, we can process
         # knob changes correctly.
         self.__set_final_construction_flag(node, True)
@@ -2201,6 +2311,18 @@ class TankWriteNodeHandler(object):
                 # force output name to be the node name:
                 new_output_name = node.knob("name").value()
             self.__set_output(node, new_output_name)
+
+        elif knob.name() == TankWriteNodeHandler.CAMERA_KNOB_NAME:
+            new_camera_name = knob.value()
+            self.__set_camera(node, new_camera_name)
+
+        elif knob.name() == TankWriteNodeHandler.LENS_KNOB_NAME:
+            new_lens_name = knob.value()
+            self.__set_lens(node, new_lens_name)
+
+        elif knob.name() == TankWriteNodeHandler.PLATE_PULLDOWN_KNOB_NAME:
+            link_plate = knob.value()
+            self.__set_plate(node, link_plate)
 
         elif knob.name() == "name":
             # node name has changed:
@@ -2362,13 +2484,22 @@ class TankWriteNodeHandler(object):
         start_frame_number = None
         start_frame_tc = None
         shot_lut = None
+        entity_linked_camera = None
+        project_cameras = []
+        entity_linked_lens = None
+        project_lenses = []
+        entity_linked_plate = None
+        entity_plates = []
 
         entity = self._app.context.entity  #can be None if in project env
 
         if entity:
             sg_entity_type = entity["type"]  # should be Shot or Asset
             sg_filters = [["id", "is", entity["id"]]]  #  code of the current shot/asset
-            sg_fields = ['sg_camera_colorspace', 'sg_source_start_frame', 'sg_source_start_timecode', 'sg_shot_lut']
+            sg_fields = ['sg_camera_colorspace', 'sg_source_start_frame',
+                    'sg_source_start_timecode', 'sg_shot_lut', 'sg_camera_2.CustomEntity06.code',
+                    'sg_lens.CustomEntity07.code'
+            ]
 
             data = self._app.shotgun.find_one(sg_entity_type, filters=sg_filters, fields=sg_fields)
             if data:
@@ -2376,6 +2507,8 @@ class TankWriteNodeHandler(object):
                 start_frame_number = data.get('sg_source_start_frame')
                 start_frame_tc = data.get('sg_source_start_timecode')
                 shot_lut = data.get('sg_shot_lut')
+                entity_linked_camera = data.get('sg_camera_2.CustomEntity06.code')
+                entity_linked_lens = data.get('sg_lens.CustomEntity07.code')
 
         # Camera colorspace field
         if camera_colorspace == None:
@@ -2406,11 +2539,55 @@ class TankWriteNodeHandler(object):
                     start_frame_tc = None
 
 
+        # Query for list of all camera names in this project
+        cam_data = self._app.shotgun.find("CustomEntity06", 
+                            filters=[["project", "is", self._app.context.project]],
+                            fields=['code'])
+        if cam_data:
+            project_cameras = [cam['code'] for cam in cam_data]
+            project_cameras = sorted(project_cameras)
+            project_cameras.insert(0, "Unknown")
+
+        # Query for list of all lens names in this proect
+        lens_data = self._app.shotgun.find("CustomEntity07", 
+                            filters=[["project", "is", self._app.context.project]],
+                            fields=['code'])
+        if lens_data:
+            project_lenses = [lens['code'] for lens in lens_data]
+            project_lenses = sorted(project_lenses)
+            project_lenses.insert(0, "Unknown")
+
+
+        # We want the list of plate types that exist in relation to this entity
+        # Query for all published files of plate publish type 
+        # linked to the current entity
+        if entity:
+            pub_plates = self._app.shotgun.find("PublishedFile", 
+                        filters=[   ["project", "is", self._app.context.project],
+                                    ["published_file_type", "is", TankWriteNodeHandler.HIERO_PLATE_PUBLISH_TYPE],
+                                    ["entity", "is", entity],
+                                ],
+                        fields=["path"])
+
+            if pub_plates:
+                for pub in pub_plates:
+                    plate_tmpl = self._app.sgtk.template_from_path(pub["path"][self.local_path])
+                    plate_fields = plate_tmpl.get_fields(pub["path"][self.local_path], skip_keys=['version'])
+                    if plate_fields.get(TankWriteNodeHandler.HIERO_PLATE_TEMPLATE_KEY):
+                        entity_plates.append(plate_fields.get(TankWriteNodeHandler.HIERO_PLATE_TEMPLATE_KEY))
+                entity_plates = list(set(entity_plates))
+                entity_plates = sorted(entity_plates, key=lambda x: (x != 'plate', x))
+
+
         self.cameraColorspace = camera_colorspace
         self.start_frame_number = start_frame_number
         self.start_frame_tc = start_frame_tc
         self.shot_lut = (shot_lut or '')
-
+        self.entity_linked_camera = entity_linked_camera
+        self.entity_linked_lens = entity_linked_lens
+        self.project_cameras = project_cameras
+        self.project_lenses = project_lenses
+        self.entity_plates = entity_plates
 
 
     def __get_node_colorspace(self, node, colorspace_type=''):
@@ -2569,3 +2746,187 @@ class TankWriteNodeHandler(object):
         self.__update_knob_value(node, "TIMECODEINFO", tc_info)
 
 
+    def get_node_camera_name(self, node):
+        """
+        Return the name of the camera the specified node is using
+        """
+        return node.knob("camera_name").value()
+
+    def get_node_lens_name(self, node):
+        """
+        Return the name of the camera the specified node is using
+        """
+        return node.knob("lens_name").value()
+
+    def get_node_plate_name(self, node):
+        '''
+        Return the name of the plate the node is using
+        '''
+        return node.knob("plate_name").value() 
+
+
+    def __update_nozon_custom_knobs_visibility(self, node):  #from __update_output_knobs
+        """
+        Update camera, lens and plate pulldown knobs visibility depending if the 
+        render template uses the "Camera", "Lens" and "plate" keys
+        """
+        camera_knob = node.knob(TankWriteNodeHandler.CAMERA_KNOB_NAME)
+        lens_knob = node.knob(TankWriteNodeHandler.LENS_KNOB_NAME)
+        refresh_sg_button = node.knob(TankWriteNodeHandler.QUERY_SHOTGRID_KNOB_NAME)
+        plate_pulldown_knob = node.knob(TankWriteNodeHandler.PLATE_PULLDOWN_KNOB_NAME)
+
+        render_template = self.__get_render_template(node, is_proxy=False)
+        proxy_render_template = self.__get_render_template(node, is_proxy=True)
+
+        for template in [render_template, proxy_render_template]:
+            if not template:
+                continue
+            if "Camera" in template.keys:
+                camera_knob.setVisible(True)
+            else:
+                camera_knob.setVisible(False)
+
+            if "Lens" in template.keys:
+                lens_knob.setVisible(True)
+            else:
+                lens_knob.setVisible(False)
+
+            if "plate" in template.keys:
+                plate_pulldown_knob.setVisible(True)
+            else:
+                plate_pulldown_knob.setVisible(False)
+
+            #Show the refresh button if the camera or lens pulldown knobs are visible
+            if camera_knob.visible() or lens_knob.visible():
+                refresh_sg_button.setVisible(True)
+            else:
+                refresh_sg_button.setVisible(False)
+
+
+
+
+    def __set_camera_lens_plate_knobs(self, node):
+
+
+        # Populate the camera and names (Nozon)
+        project_cameras = self.project_cameras
+
+        current_camera_name = self.get_node_camera_name(node)
+
+        # camera name no longer exist in SG
+        if current_camera_name and current_camera_name not in project_cameras:
+            # camera no longer exists but we need to handle this so add it
+            # to the list:
+            current_camera_name = "Unknown - was %s" % current_camera_name
+            project_cameras.insert(0, current_camera_name)
+
+        cameras_knob_list = node.knob(TankWriteNodeHandler.CAMERA_KNOB_NAME).values()
+        if cameras_knob_list != project_cameras:
+            node.knob(TankWriteNodeHandler.CAMERA_KNOB_NAME).setValues(project_cameras)
+
+        if not current_camera_name:
+            # default to first camera:
+            current_camera_name = node.knob(TankWriteNodeHandler.CAMERA_KNOB_NAME).value()
+
+        # ensure that the correct entry is selected from the list:
+        self.__update_knob_value(node, TankWriteNodeHandler.CAMERA_KNOB_NAME, current_camera_name)
+        # and make sure the node is up-to-date with the profile:
+        self.__set_camera(node, current_camera_name)
+
+
+        project_lenses = self.project_lenses
+        current_lens_name = self.get_node_lens_name(node)
+        # lens name no longer exist in SG
+        if current_lens_name and current_lens_name not in project_lenses:
+            # lens no longer exists but we need to handle this so add it
+            # to the list:
+            current_lens_name = "Unknown - was %s" % current_lens_name
+            project_lenses.insert(0, current_lens_name)
+
+        lens_knob_list = node.knob(TankWriteNodeHandler.LENS_KNOB_NAME).values()
+        if lens_knob_list != project_lenses:
+            node.knob(TankWriteNodeHandler.LENS_KNOB_NAME).setValues(project_lenses)
+
+        if not current_lens_name:
+            # default to first lens:
+            current_lens_name = node.knob(TankWriteNodeHandler.LENS_KNOB_NAME).value()
+
+        # ensure that the correct entry is selected from the list:
+        self.__update_knob_value(node, TankWriteNodeHandler.LENS_KNOB_NAME, current_lens_name)
+        # and make sure the node is up-to-date with the profile:
+        self.__set_lens(node, current_lens_name)
+
+
+        entity_plates = self.entity_plates
+
+        current_plate_name = self.get_node_plate_name(node)
+        # plate name no longer exist in SG
+        if current_plate_name and current_plate_name not in entity_plates:
+            # plate no longer exists but we need to handle this so add it
+            # to the list:
+            current_plate_name = "Unknown - was %s" % current_plate_name
+            entity_plates.insert(0, current_plate_name)
+
+        plates_knob_list = node.knob(TankWriteNodeHandler.PLATE_PULLDOWN_KNOB_NAME).values()
+        if plates_knob_list != entity_plates:
+            node.knob(TankWriteNodeHandler.PLATE_PULLDOWN_KNOB_NAME).setValues(entity_plates)
+
+        if not current_plate_name:
+            # default to first plate:
+            current_plate_name = node.knob(TankWriteNodeHandler.PLATE_PULLDOWN_KNOB_NAME).value()
+
+
+        # ensure that the correct entry is selected from the list:
+        self.__update_knob_value(node, TankWriteNodeHandler.PLATE_PULLDOWN_KNOB_NAME, current_plate_name)
+        # and make sure the node is up-to-date with the profile:
+        self.__set_plate(node, current_plate_name)
+
+
+
+
+
+
+    def __set_camera(self, node, camera_name):
+        """
+        Set the camera on the specified node from user interaction.
+        """
+        self._app.log_debug(
+            "Changing the camera for node '%s' to: %s" % (node.name(), camera_name)
+        )
+
+        # update camera knob:
+        self.__update_knob_value(
+            node, "camera_name", camera_name
+        )
+
+        # reset the render path:
+        self.reset_render_path(node)
+
+    def __set_lens(self, node, lens_name):
+        """
+        Set the lens on the specified node from user interaction.
+        """
+        self._app.log_debug(
+            "Changing the lens for node '%s' to: %s" % (node.name(), lens_name)
+        )
+
+        # update lens knob:
+        self.__update_knob_value(
+            node, "lens_name", lens_name
+        )
+
+        # reset the render path:
+        self.reset_render_path(node)
+
+    def __set_plate(self, node, link_plate):
+        '''
+        Enable linking to the plate type from user interaction.
+        '''
+
+        # update lens knob:
+        self.__update_knob_value(
+            node, "plate_name", link_plate
+        )
+
+        # reset the render path:
+        self.reset_render_path(node)

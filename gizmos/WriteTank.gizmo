@@ -129,6 +129,54 @@ Gizmo {
     +INVISIBLE
  }
  addUserKnob {
+    1 camera_name
+    l "Camera name"
+    t "The cached Camera name for this node"
+    +INVISIBLE
+ }
+ addUserKnob {
+    1 lens_name
+    l "Lens name"
+    t "The cached Lens name for this node"
+    +INVISIBLE
+ }
+ addUserKnob {
+    4 camera_pulldown
+    l Camera
+    t "Choose the camera that corresponds to this STMap"
+    M {}
+    +DO_NOT_WRITE
+ }
+ addUserKnob {
+    4 lens_pulldown
+    l Lens
+    t "Choose the lens that corresponds to this STMap"
+    M {}
+    -STARTLINE
+    +DO_NOT_WRITE
+ }
+ addUserKnob {
+    22 query_shotgrid
+    l "Refresh info from ShotGrid"
+    T "import nuke\nif hasattr(nuke, \"_shotgun_write_node_handler\"):\n    nuke._shotgun_write_node_handler.on_refresh_shotgrid_infos_gizmo_callback()"
+    t "Query SG to get an up to date list of cameras and lenses defined in this project"
+    +STARTLINE
+ }
+ addUserKnob {
+    4 plate_pulldown
+    l "Link to plate:"
+    t "Choose the plate type that this STMap will be linked to"
+    M {}
+    -STARTLINE
+    +DO_NOT_WRITE
+ }
+ addUserKnob {
+    1 plate_name
+    l "Plate name"
+    t "The cached Plate name for this node"
+    +INVISIBLE
+ }
+ addUserKnob {
     26 ""
     l ""
     +STARTLINE

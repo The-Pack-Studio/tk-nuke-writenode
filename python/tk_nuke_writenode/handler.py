@@ -2817,8 +2817,9 @@ class TankWriteNodeHandler(object):
         if current_camera_name and current_camera_name not in project_cameras:
             # camera no longer exists but we need to handle this so add it
             # to the list:
-            current_camera_name = "Unknown - was %s" % current_camera_name
-            project_cameras.insert(0, current_camera_name)
+            if not "Unknown" in current_camera_name:
+                current_camera_name = "Unknown - was %s" % current_camera_name
+                project_cameras.insert(0, current_camera_name)
 
         cameras_knob_list = node.knob(TankWriteNodeHandler.CAMERA_KNOB_NAME).values()
         if cameras_knob_list != project_cameras:
@@ -2840,8 +2841,9 @@ class TankWriteNodeHandler(object):
         if current_lens_name and current_lens_name not in project_lenses:
             # lens no longer exists but we need to handle this so add it
             # to the list:
-            current_lens_name = "Unknown - was %s" % current_lens_name
-            project_lenses.insert(0, current_lens_name)
+            if not "Unknown" in current_lens_name:
+                current_lens_name = "Unknown - was %s" % current_lens_name
+                project_lenses.insert(0, current_lens_name)
 
         lens_knob_list = node.knob(TankWriteNodeHandler.LENS_KNOB_NAME).values()
         if lens_knob_list != project_lenses:
@@ -2864,8 +2866,9 @@ class TankWriteNodeHandler(object):
         if current_plate_name and current_plate_name not in entity_plates:
             # plate no longer exists but we need to handle this so add it
             # to the list:
-            current_plate_name = "Unknown - was %s" % current_plate_name
-            entity_plates.insert(0, current_plate_name)
+            if not "Unknown" in current_plate_name:
+                current_plate_name = "Unknown - was %s" % current_plate_name
+                entity_plates.insert(0, current_plate_name)
 
         plates_knob_list = node.knob(TankWriteNodeHandler.PLATE_PULLDOWN_KNOB_NAME).values()
         if plates_knob_list != entity_plates:

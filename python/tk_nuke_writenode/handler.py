@@ -2836,8 +2836,8 @@ class TankWriteNodeHandler(object):
         Update camera, lens and plate pulldown knobs visibility depending if the 
         render template uses the "Camera", "Lens" and "plate" keys
         """
-        camera_knob = node.knob(TankWriteNodeHandler.CAMERA_KNOB_NAME)
-        lens_knob = node.knob(TankWriteNodeHandler.LENS_KNOB_NAME)
+        camera_knob = node.knob(TankWriteNodeHandler.CAMERA_PULLDOWN_KNOB_NAME)
+        lens_knob = node.knob(TankWriteNodeHandler.LENS_PULLDOWN_KNOB_NAME)
         refresh_sg_button = node.knob(TankWriteNodeHandler.QUERY_SHOTGRID_KNOB_NAME)
         plate_pulldown_knob = node.knob(TankWriteNodeHandler.PLATE_PULLDOWN_KNOB_NAME)
 

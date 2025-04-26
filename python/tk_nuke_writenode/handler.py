@@ -2832,6 +2832,42 @@ class TankWriteNodeHandler(object):
 
 
     def __update_nozon_custom_knobs_visibility(self, node):
+        """
+        Update camera, lens and plate pulldown knobs visibility depending if the 
+        render template uses the "Camera", "Lens" and "plate" keys
+        """
+        camera_knob = node.knob(TankWriteNodeHandler.CAMERA_KNOB_NAME)
+        lens_knob = node.knob(TankWriteNodeHandler.LENS_KNOB_NAME)
+        refresh_sg_button = node.knob(TankWriteNodeHandler.QUERY_SHOTGRID_KNOB_NAME)
+        plate_pulldown_knob = node.knob(TankWriteNodeHandler.PLATE_PULLDOWN_KNOB_NAME)
+
+        render_template = self.__get_render_template(node, is_proxy=False)
+        proxy_render_template = self.__get_render_template(node, is_proxy=True)
+
+        for template in [render_template, proxy_render_template]:
+            if not template:
+                continue
+            if "Camera" in template.keys:
+                camera_knob.setVisible(True)
+            else:
+                camera_knob.setVisible(False)
+
+            if "Lens" in template.keys:
+                lens_knob.setVisible(True)
+            else:
+                lens_knob.setVisible(False)
+
+            if "plate" in template.keys:
+                plate_pulldown_knob.setVisible(True)
+            else:
+                plate_pulldown_knob.setVisible(False)
+
+            #Show the refresh button if the camera or lens pulldown knobs are visible
+            if camera_knob.visible() or lens_knob.visible():
+                refresh_sg_button.setVisible(True)
+            else:
+                refresh_sg_button.setVisible(False)
+
 
 
 

@@ -294,17 +294,16 @@ class NukeWriteNode(tank.platform.Application):
 
     def get_node_camera_name(self, node):
 
-        return self.__write_node_handler.get_node_camera_name(node)
+        return self.__write_node_handler.get_node_camera_cached_name(node)
 
     def get_node_lens_name(self, node):
         
-        return self.__write_node_handler.get_node_lens_name(node)
+        return self.__write_node_handler.get_node_lens_cached_name(node)
 
     def get_node_plate_name(self, node):
-        '''
-        Return the name of the plate the node is using
-        '''
-        return self.__write_node_handler.get_node_plate_name(node)
+
+        return self.__write_node_handler.get_node_plate_cached_name(node)
+
 
     # Private methods
     #

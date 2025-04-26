@@ -34,7 +34,7 @@ class TankWriteNodeHandler(object):
     """
 
     SG_WRITE_NODE_CLASS = "WriteTank"
-    SG_WRITE_DEFAULT_NAME = "FlowProductionTrackingWrite"
+    SG_WRITE_DEFAULT_NAME = "ShotGridWrite"
     WRITE_NODE_NAME = "Write1"
     OCIO_NODE_NAME = "OCIOColorSpace1"
     ADD_TC_NODE_NAME = "ShotGridAddTimeCode"
@@ -44,13 +44,12 @@ class TankWriteNodeHandler(object):
 
     DEFAULT_OUTPUT_NAME = "output"
 
-    CAMERA_KNOB_NAME = "camera_pulldown"
-    LENS_KNOB_NAME = "lens_pulldown"
+    CAMERA_PULLDOWN_KNOB_NAME = "camera_pulldown"
+    LENS_PULLDOWN_KNOB_NAME = "lens_pulldown"
+    PLATE_PULLDOWN_KNOB_NAME = "plate_pulldown"
     QUERY_SHOTGRID_KNOB_NAME = "query_shotgrid"
 
     HIERO_PLATE_PUBLISH_TYPE = {'id': 59, 'name': 'Hiero Plate', 'type': 'PublishedFileType'}
-
-    PLATE_PULLDOWN_KNOB_NAME = "plate_pulldown"
 
     HIERO_PLATE_TEMPLATE_KEY = "output" # token name in the templates.yml that define the plate type
 
@@ -1957,20 +1956,19 @@ class TankWriteNodeHandler(object):
                 colorspace_name = ocio_node.knob('out_colorspace').value()
 
             if "Camera" in render_template.keys:
-                camera_name = self.get_node_camera_name(node)
-                if "Unknown" in camera_name:
-                    camera_name = ""
+                camera_name = self.get_node_camera_pulldown_name(node)
+                if camera_name not in self.project_cameras:
+                    camera_name = "INVALIDCAM"
 
             if "Lens" in render_template.keys:
-                lens_name = self.get_node_lens_name(node)
-                if "Unknown" in lens_name:
-                    lens_name = ""
+                lens_name = self.get_node_lens_pulldown_name(node)
+                if lens_name not in self.project_lenses:
+                    lens_name = "INVALIDLENS"
 
             if "plate" in render_template.keys:
-                plate_name = self.get_node_plate_name(node)
-                if "Unknown" in plate_name:
-                    plate_name = ""
-
+                plate_name = self.get_node_plate_pulldown_name(node)
+                if plate_name not in self.entity_plates:
+                    plate_name = "INVALIDPLATE"
 
         return (render_template, width, height, output_name,
                  colorspace_name, camera_name, lens_name, plate_name)
@@ -2080,28 +2078,13 @@ class TankWriteNodeHandler(object):
             fields["colorspace"] = colorspace_name
 
         if "Camera" in render_template.keys:
-            if not camera_name:
-                if not render_template.is_optional("Camera"):
-                    raise TkComputePathError(
-                        "A valid camera name is required by this profile for the 'Camera' field!")
-            else:
-                fields["Camera"] = camera_name
+            fields["Camera"] = camera_name
 
         if "Lens" in render_template.keys:
-            if not lens_name:
-                if not render_template.is_optional("Lens"):
-                    raise TkComputePathError(
-                        "A valid lens name is required by this profile for the 'Lens' field!")
-            else:
-                fields["Lens"] = lens_name
+            fields["Lens"] = lens_name
 
         if "plate" in render_template.keys:
-            if not plate_name:
-                if not render_template.is_optional("plate"):
-                    raise TkComputePathError(
-                        "A valid plate name is required by this profile for the 'plate' field!")
-            else:
-                fields["plate"] = plate_name
+            fields["plate"] = plate_name
 
 
         # update with additional fields from the context:
@@ -2312,17 +2295,17 @@ class TankWriteNodeHandler(object):
                 new_output_name = node.knob("name").value()
             self.__set_output(node, new_output_name)
 
-        elif knob.name() == TankWriteNodeHandler.CAMERA_KNOB_NAME:
+        elif knob.name() == TankWriteNodeHandler.CAMERA_PULLDOWN_KNOB_NAME:
             new_camera_name = knob.value()
-            self.__set_camera(node, new_camera_name)
+            self.__set_cached_camera(node, new_camera_name)
 
-        elif knob.name() == TankWriteNodeHandler.LENS_KNOB_NAME:
+        elif knob.name() == TankWriteNodeHandler.LENS_PULLDOWN_KNOB_NAME:
             new_lens_name = knob.value()
-            self.__set_lens(node, new_lens_name)
+            self.__set_cached_lens(node, new_lens_name)
 
         elif knob.name() == TankWriteNodeHandler.PLATE_PULLDOWN_KNOB_NAME:
-            link_plate = knob.value()
-            self.__set_plate(node, link_plate)
+            new_plate = knob.value()
+            self.__set_cached_plate(node, new_plate)
 
         elif knob.name() == "name":
             # node name has changed:
@@ -2544,18 +2527,18 @@ class TankWriteNodeHandler(object):
                             filters=[["project", "is", self._app.context.project]],
                             fields=['code'])
         if cam_data:
-            project_cameras = [cam['code'] for cam in cam_data]
-            project_cameras = sorted(project_cameras)
-            project_cameras.insert(0, "Unknown")
+            cameras = [cam['code'] for cam in cam_data]
+            cameras = sorted(cameras)
+            project_cameras.extend(cameras)
 
         # Query for list of all lens names in this proect
         lens_data = self._app.shotgun.find("CustomEntity07", 
                             filters=[["project", "is", self._app.context.project]],
                             fields=['code'])
         if lens_data:
-            project_lenses = [lens['code'] for lens in lens_data]
-            project_lenses = sorted(project_lenses)
-            project_lenses.insert(0, "Unknown")
+            lenses = [lens['code'] for lens in lens_data]
+            lenses = sorted(lenses)
+            project_lenses.extend(lenses)
 
 
         # We want the list of plate types that exist in relation to this entity
@@ -2746,61 +2729,109 @@ class TankWriteNodeHandler(object):
         self.__update_knob_value(node, "TIMECODEINFO", tc_info)
 
 
-    def get_node_camera_name(self, node):
+    def get_node_camera_pulldown_name(self, node):
         """
-        Return the name of the camera the specified node is using
+        Get the camera name from the camera pulldown knob
+        NOTE this might be a non existing camera (ex "Alexa35 [Missing]")
+        """
+        return node.knob(TankWriteNodeHandler.CAMERA_PULLDOWN_KNOB_NAME).value()
+
+
+    def get_node_camera_cached_name(self, node):
+        """
+        Return the name of the cached camera the specified node is using
         """
         return node.knob("camera_name").value()
 
-    def get_node_lens_name(self, node):
+
+    def __set_cached_camera(self, node, camera_name):
         """
-        Return the name of the camera the specified node is using
+        Stores the camera on the camera cache knob
+        """
+        camera_name = camera_name.replace(" [Missing]", "")
+        if camera_name == "Not Set":
+            camera_name = ""
+
+        self.__update_knob_value(node, "camera_name", camera_name)
+
+        self._app.log_debug(
+            "Changing the cached camera for node '%s' to: %s" % (node.name(), camera_name)
+        )
+
+        # reset the render path:
+        self.reset_render_path(node)
+
+
+    def get_node_lens_pulldown_name(self, node):
+        """
+        Get the lens name from the pulldown knob
+        NOTE this might be a non existing lens (ex "18mm [Missing]")
+        """
+        return node.knob(TankWriteNodeHandler.LENS_PULLDOWN_KNOB_NAME).value()
+
+    def get_node_lens_cached_name(self, node):
+        """
+        Return the name of the cached lens the specified node is using
         """
         return node.knob("lens_name").value()
 
-    def get_node_plate_name(self, node):
+
+    def __set_cached_lens(self, node, lens_name):
+        """
+        Stores the lens on the lens cache knob
+        """
+
+        lens_name = lens_name.replace(" [Missing]", "")
+        if lens_name == "Not Set":
+            lens_name == ""
+
+        self.__update_knob_value(node, "lens_name", lens_name)
+        
+        self._app.log_debug(
+            "Changing the cached lens for node '%s' to: %s" % (node.name(), lens_name)
+        )
+
+        # reset the render path:
+        self.reset_render_path(node)
+
+
+
+    def get_node_plate_pulldown_name(self, node):
+        """
+        Get the plate name from the pulldown knob
+        NOTE this might be a non existing plate (ex "foreground [Missing]")
+        """
+        return node.knob(TankWriteNodeHandler.PLATE_PULLDOWN_KNOB_NAME).value()
+
+
+    def get_node_plate_cached_name(self, node):
         '''
-        Return the name of the plate the node is using
+        Return the name of the cached plate the specified node is using
         '''
         return node.knob("plate_name").value() 
 
 
-    def __update_nozon_custom_knobs_visibility(self, node):  #from __update_output_knobs
+    def __set_cached_plate(self, node, link_plate):
         """
-        Update camera, lens and plate pulldown knobs visibility depending if the 
-        render template uses the "Camera", "Lens" and "plate" keys
+        Stores the plate on the plate cache knob
         """
-        camera_knob = node.knob(TankWriteNodeHandler.CAMERA_KNOB_NAME)
-        lens_knob = node.knob(TankWriteNodeHandler.LENS_KNOB_NAME)
-        refresh_sg_button = node.knob(TankWriteNodeHandler.QUERY_SHOTGRID_KNOB_NAME)
-        plate_pulldown_knob = node.knob(TankWriteNodeHandler.PLATE_PULLDOWN_KNOB_NAME)
+        link_plate = link_plate.replace(" [Missing]", "")
+        if link_plate == "Not Set":
+            link_plate = ""
 
-        render_template = self.__get_render_template(node, is_proxy=False)
-        proxy_render_template = self.__get_render_template(node, is_proxy=True)
+        # update plate knob:
+        self.__update_knob_value(node, "plate_name", link_plate)
 
-        for template in [render_template, proxy_render_template]:
-            if not template:
-                continue
-            if "Camera" in template.keys:
-                camera_knob.setVisible(True)
-            else:
-                camera_knob.setVisible(False)
+        self._app.log_debug(
+            "Changing the linked plate name for node '%s' to: %s" % (node.name(), link_plate)
+        )
 
-            if "Lens" in template.keys:
-                lens_knob.setVisible(True)
-            else:
-                lens_knob.setVisible(False)
+        # reset the render path:
+        self.reset_render_path(node)        
 
-            if "plate" in template.keys:
-                plate_pulldown_knob.setVisible(True)
-            else:
-                plate_pulldown_knob.setVisible(False)
 
-            #Show the refresh button if the camera or lens pulldown knobs are visible
-            if camera_knob.visible() or lens_knob.visible():
-                refresh_sg_button.setVisible(True)
-            else:
-                refresh_sg_button.setVisible(False)
+
+    def __update_nozon_custom_knobs_visibility(self, node):
 
 
 
@@ -2808,128 +2839,100 @@ class TankWriteNodeHandler(object):
     def __set_camera_lens_plate_knobs(self, node):
 
 
-        # Populate the camera and names (Nozon)
-        project_cameras = self.project_cameras
+        ##### Cameras
 
-        current_camera_name = self.get_node_camera_name(node)
+        # project_cameras is a COPY of the self.project_cameras attribute
+        project_cameras = list(self.project_cameras)
+        project_cameras.insert(0, "Not Set")
+        current_cached_camera = self.get_node_camera_cached_name(node)
 
-        # camera name no longer exist in SG
-        if current_camera_name and current_camera_name not in project_cameras:
-            # camera no longer exists but we need to handle this so add it
-            # to the list:
-            if not "Unknown" in current_camera_name:
-                current_camera_name = "Unknown - was %s" % current_camera_name
-                project_cameras.insert(0, current_camera_name)
+        # if camera name no longer exist in SG
+        if current_cached_camera and current_cached_camera not in self.project_cameras:
+            # camera no longer exists in SG but we need to handle this so add it
+            current_cached_camera = "%s [Missing]" % current_cached_camera
+            project_cameras.insert(0, current_cached_camera)
 
-        cameras_knob_list = node.knob(TankWriteNodeHandler.CAMERA_KNOB_NAME).values()
+        cameras_knob_list = node.knob(TankWriteNodeHandler.CAMERA_PULLDOWN_KNOB_NAME).values()
+
         if cameras_knob_list != project_cameras:
-            node.knob(TankWriteNodeHandler.CAMERA_KNOB_NAME).setValues(project_cameras)
+            node.knob(TankWriteNodeHandler.CAMERA_PULLDOWN_KNOB_NAME).setValues(project_cameras)
 
-        if not current_camera_name:
+        if not current_cached_camera:
             # default to first camera:
-            current_camera_name = node.knob(TankWriteNodeHandler.CAMERA_KNOB_NAME).value()
+            current_cached_camera = node.knob(TankWriteNodeHandler.CAMERA_PULLDOWN_KNOB_NAME).value()
 
         # ensure that the correct entry is selected from the list:
-        self.__update_knob_value(node, TankWriteNodeHandler.CAMERA_KNOB_NAME, current_camera_name)
+        self.__update_knob_value(node, TankWriteNodeHandler.CAMERA_PULLDOWN_KNOB_NAME, current_cached_camera)
         # and make sure the node is up-to-date with the profile:
-        self.__set_camera(node, current_camera_name)
+        if current_cached_camera != "Not Set":
+            self.__set_cached_camera(node, current_cached_camera)
 
 
-        project_lenses = self.project_lenses
-        current_lens_name = self.get_node_lens_name(node)
-        # lens name no longer exist in SG
-        if current_lens_name and current_lens_name not in project_lenses:
-            # lens no longer exists but we need to handle this so add it
-            # to the list:
-            if not "Unknown" in current_lens_name:
-                current_lens_name = "Unknown - was %s" % current_lens_name
-                project_lenses.insert(0, current_lens_name)
 
-        lens_knob_list = node.knob(TankWriteNodeHandler.LENS_KNOB_NAME).values()
+        ##### Lenses
+
+        # project_lenses is a COPY of the self.project_lenses attribute
+        project_lenses = list(self.project_lenses)
+        project_lenses.insert(0, "Not Set")
+        current_cached_lens = self.get_node_lens_cached_name(node)
+
+        # if lens name no longer exist in SG
+        if current_cached_lens and current_cached_lens not in self.project_lenses:
+            # lens no longer exists in SG but we need to handle this so add it
+            current_cached_lens = "%s [Missing]" % current_cached_lens
+            self._app.log_info("insert missing lens=%s" % current_cached_lens)
+            project_lenses.insert(0, current_cached_lens)
+
+        lens_knob_list = node.knob(TankWriteNodeHandler.LENS_PULLDOWN_KNOB_NAME).values()
+
         if lens_knob_list != project_lenses:
-            node.knob(TankWriteNodeHandler.LENS_KNOB_NAME).setValues(project_lenses)
+            node.knob(TankWriteNodeHandler.LENS_PULLDOWN_KNOB_NAME).setValues(project_lenses)
 
-        if not current_lens_name:
+        if not current_cached_lens:
             # default to first lens:
-            current_lens_name = node.knob(TankWriteNodeHandler.LENS_KNOB_NAME).value()
+            current_cached_lens = node.knob(TankWriteNodeHandler.LENS_PULLDOWN_KNOB_NAME).value()
 
         # ensure that the correct entry is selected from the list:
-        self.__update_knob_value(node, TankWriteNodeHandler.LENS_KNOB_NAME, current_lens_name)
+        self.__update_knob_value(node, TankWriteNodeHandler.LENS_PULLDOWN_KNOB_NAME, current_cached_lens)
+
         # and make sure the node is up-to-date with the profile:
-        self.__set_lens(node, current_lens_name)
+        if current_cached_lens != "Not Set":
+            self.__set_cached_lens(node, current_cached_lens)
 
 
-        entity_plates = self.entity_plates
 
-        current_plate_name = self.get_node_plate_name(node)
+
+        ###### Plates
+
+        entity_plates = list(self.entity_plates)
+        entity_plates.insert(0, "Not Set")
+        current_cached_plate = self.get_node_plate_cached_name(node)
         # plate name no longer exist in SG
-        if current_plate_name and current_plate_name not in entity_plates:
+        if current_cached_plate and current_cached_plate not in self.entity_plates:
             # plate no longer exists but we need to handle this so add it
-            # to the list:
-            if not "Unknown" in current_plate_name:
-                current_plate_name = "Unknown - was %s" % current_plate_name
-                entity_plates.insert(0, current_plate_name)
+            current_cached_plate = "%s [Missing]" % current_cached_plate
+            entity_plates.insert(0, current_cached_plate)
 
         plates_knob_list = node.knob(TankWriteNodeHandler.PLATE_PULLDOWN_KNOB_NAME).values()
+        
         if plates_knob_list != entity_plates:
             node.knob(TankWriteNodeHandler.PLATE_PULLDOWN_KNOB_NAME).setValues(entity_plates)
 
-        if not current_plate_name:
+        if not current_cached_plate:
             # default to first plate:
-            current_plate_name = node.knob(TankWriteNodeHandler.PLATE_PULLDOWN_KNOB_NAME).value()
+            current_cached_plate = node.knob(TankWriteNodeHandler.PLATE_PULLDOWN_KNOB_NAME).value()
 
 
         # ensure that the correct entry is selected from the list:
-        self.__update_knob_value(node, TankWriteNodeHandler.PLATE_PULLDOWN_KNOB_NAME, current_plate_name)
+        self.__update_knob_value(node, TankWriteNodeHandler.PLATE_PULLDOWN_KNOB_NAME, current_cached_plate)
         # and make sure the node is up-to-date with the profile:
-        self.__set_plate(node, current_plate_name)
+        if current_cached_plate != "Not Set":
+            self.__set_cached_plate(node, current_cached_plate)
 
 
 
 
 
 
-    def __set_camera(self, node, camera_name):
-        """
-        Set the camera on the specified node from user interaction.
-        """
-        self._app.log_debug(
-            "Changing the camera for node '%s' to: %s" % (node.name(), camera_name)
-        )
 
-        # update camera knob:
-        self.__update_knob_value(
-            node, "camera_name", camera_name
-        )
 
-        # reset the render path:
-        self.reset_render_path(node)
-
-    def __set_lens(self, node, lens_name):
-        """
-        Set the lens on the specified node from user interaction.
-        """
-        self._app.log_debug(
-            "Changing the lens for node '%s' to: %s" % (node.name(), lens_name)
-        )
-
-        # update lens knob:
-        self.__update_knob_value(
-            node, "lens_name", lens_name
-        )
-
-        # reset the render path:
-        self.reset_render_path(node)
-
-    def __set_plate(self, node, link_plate):
-        '''
-        Enable linking to the plate type from user interaction.
-        '''
-
-        # update lens knob:
-        self.__update_knob_value(
-            node, "plate_name", link_plate
-        )
-
-        # reset the render path:
-        self.reset_render_path(node)
